@@ -95,6 +95,21 @@ Only one class in the DLL needs to implement `IModApi`. The game finds and calls
 
 ---
 
+## Loading Order
+
+The game loads mods in this sequence:
+
+1. **Discover mods** — scans `Mods/` directory
+2. **Load DLLs** — loads each mod's assembly
+3. **Call `InitMod()`** — invokes `IModApi.InitMod()` for each mod
+4. **Load Config XMLs** — parses and merges all `Config/*.xml` patches (blocks, items, etc.)
+5. **Load Localization** — reads `Config/Localization.txt` from each mod
+6. **Initialize world** — loads or creates the game world
+
+**Key insight:** Since `InitMod()` runs *before* Config XMLs and Localization are loaded, mods can **dynamically generate** config files during initialization. This enables items, blocks, or localization entries that depend on runtime conditions (e.g., user-provided content files) rather than being hardcoded at build time.
+
+---
+
 ## XML Config Patching
 
 All XML files in `Config/` are XPath patch files — they modify vanilla game XML rather than replacing it. See [[XML Patching (XPath)]] for the full reference.

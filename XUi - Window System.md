@@ -521,4 +521,16 @@ In `xui.xml` you can set the global UI scale for the ruleset:
 
 > **Controller class naming**: The `controller="Foo"` attribute in XML maps to the C# class `Foo` exactly — no prefix is added for mod assemblies. Your class must be named `Foo`, not `XUiC_Foo`.
 
+> **Filled sprites for progress bars**: Use `type="filled"` on a `<sprite>` element to create a progress bar. The `fill` attribute (0.0–1.0) controls how much is visible. In C#, access via `XUiV_Sprite.Fill`. Combine with a grey backing sprite at lower depth for the empty portion:
+> ```xml
+> <sprite depth="3" name="back" color="110,110,110,160"
+>         width="300" height="30" type="filled" fill="1"/>
+> <sprite depth="5" name="sprFill" color="200,40,40,200"
+>         width="300" height="30" type="filled" fill="0"/>
+> ```
+
+> **Sliced sprites for UI panels**: Use `type="sliced"` for backgrounds and borders. This does 9-slice scaling so edges don't stretch. Common sprites: `ui_game_panel_header`, `ui_game_panel_bg`, `menu_empty3px`. Set `fillcenter="true"` or `fillcenter="false"` to control center fill.
+
+> **Custom buttons without white background**: Buttons always have a white sprite. To create a styled button, layer: background `<sprite>` → invisible `<button style="press" color="0,0,0,0"/>` → icon `<sprite>` → `<label>`. The button captures clicks while the sprite provides the visual.
+
 > **`color` on `<button>` does NOT tint the background.** Buttons always render with their default white/light sprite regardless of the `color` attribute. To get readable text on buttons, use a separate `<label>` child with `color="[black]"` (dark text on light button) rather than relying on the button's own text rendering or background tinting. For colored swatches (e.g. a palette), use `<rect style="press">` with a `<sprite color="R,G,B,A" type="sliced" />` child instead of a `<button>` — sprites properly render the color, and `style="press"` makes the rect clickable via `OnPress`.

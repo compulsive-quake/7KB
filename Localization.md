@@ -74,3 +74,5 @@ The game renders this as a styled hyperlink to the `resourceWood` item page.
 - If a key is missing, the raw key string is displayed (useful for debugging)
 - The CSV must use commas; don't use quotes around values unless the value contains a comma
 - The `Context` column is for translator notes — it is not shown in-game
+
+> **Gotcha:** Adding `blockcommand_` localization entries in a mod's `Localization.txt` can cause an `IndexOutOfRangeException` in `Localization.WriteCsv`, crashing the entire XUi system on startup. The radial menu will fall back to displaying the raw command name if no `blockcommand_` key is found — which is acceptable. Avoid adding `blockcommand_` entries in mod localization until the root cause is better understood.

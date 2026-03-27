@@ -6,9 +6,14 @@ Shared knowledgebase for 7DTD mod development. Used by multiple projects (7nes, 
 
 - [Mod Structure](Mod%20Structure.md) — Folder layout, ModInfo.xml, DLL loading, modlet system
 - [XML Patching (XPath)](XML%20Patching%20(XPath).md) — How to patch vanilla XML configs; sounds system
+- [Harmony Patching](Harmony%20Patching.md) — Harmony prefix/postfix patterns, common targets, reflection
 - [Localization](Localization.md) — Adding translated text keys
 - [Blocks](Blocks.md) — Custom block classes, XPath patches, block properties
+- [Workstations](Workstations.md) — Workstation blocks, modules, tool slots, XUi window groups
+- [Items](Items.md) — Custom item definitions, icons (ItemIconAtlas), dynamic item generation
+- [Power Sources](Power%20Sources.md) — Custom power generators, TileEntityPowerSource, fuel management, power system C# internals
 - [Entities](Entities.md) — Custom entity classes (NPCs, zombies, animals), AI tasks, drops
+- [Asset Bundles](Asset%20Bundles.md) — Loading custom models, particles, sounds from .unity3d bundles
 - [Paint & Textures](Paint%20%26%20Textures.md) — Block paint texture IDs and the paint system
 
 ## XUi (UI System)
