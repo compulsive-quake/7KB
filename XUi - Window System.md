@@ -507,6 +507,169 @@ In `xui.xml` you can set the global UI scale for the ruleset:
 
 ---
 
+## Recommended Alternative: Unity IMGUI (OnGUI)
+
+XUi has persistent, hard-to-debug issues with text rendering inside `<button>` and `<rect>` containers — labels inside buttons are frequently invisible regardless of depth, color, or layout settings. After extensive testing, **Unity IMGUI (`OnGUI`) is the recommended approach for mod windows** that need clickable lists, text, or interactive elements.
+
+IMGUI bypasses XUi entirely and renders reliably every time. The 7Window ScreenAlignTool uses this approach successfully.
+
+### IMGUI Window Pattern (Known Good Starting Point)
+
+```csharp
+using System.Collections.Generic;
+using UnityEngine;
+using UnityEngine.Scripting;
+
+[Preserve]
+public class MyModBrowserIMGUI : MonoBehaviour
+{
+    private static MyModBrowserIMGUI _instance;
+    public static MyModBrowserIMGUI Instance
+    {
+        get
+        {
+            if (_instance == null)
+            {
+                var go = new GameObject("MyModBrowserIMGUI");
+                _instance = go.AddComponent<MyModBrowserIMGUI>();
+                DontDestroyOnLoad(go);
+            }
+            return _instance;
+        }
+    }
+
+    private bool _active;
+    private Vector2 _scrollPos;
+    private GUIStyle _labelStyle, _buttonStyle, _titleStyle, _boxStyle;
+    private bool _stylesInit;
+
+    public void Open()
+    {
+        _active = true;
+        _scrollPos = Vector2.zero;
+        var player = GameManager.Instance?.World?.GetPrimaryPlayer();
+        if (player != null) player.SetControllable(false);
+        Cursor.visible = true;
+        Cursor.lockState = CursorLockMode.None;
+    }
+
+    public void Close()
+    {
+        _active = false;
+        var player = GameManager.Instance?.World?.GetPrimaryPlayer();
+        if (player != null) player.SetControllable(true);
+    }
+
+    void Update()
+    {
+        if (!_active) return;
+        Cursor.visible = true;
+        Cursor.lockState = CursorLockMode.None;
+        if (Input.GetKeyDown(KeyCode.Escape)) Close();
+        Input.ResetInputAxes();
+    }
+
+    void OnGUI()
+    {
+        if (!_active) return;
+        InitStyles();
+
+        // 2x scale for readability
+        const float scale = 2f;
+        var oldMatrix = GUI.matrix;
+        GUI.matrix = Matrix4x4.TRS(
+            Vector3.zero, Quaternion.identity, new Vector3(scale, scale, 1f));
+
+        float panelW = 320, panelH = 280;
+        float px = (Screen.width / scale - panelW) / 2f;
+        float py = (Screen.height / scale - panelH) / 2f;
+
+        // Dark background (doubled for opacity)
+        GUI.Box(new Rect(px - 10, py - 10, panelW + 20, panelH + 20), "", _boxStyle);
+        GUI.Box(new Rect(px - 10, py - 10, panelW + 20, panelH + 20), "", _boxStyle);
+
+        float y = py;
+
+        // Title + close button
+        GUI.Label(new Rect(px, y, panelW - 60, 30), "My Window", _titleStyle);
+        if (GUI.Button(new Rect(px + panelW - 30, y, 30, 25), "X", _buttonStyle))
+            Close();
+        y += 35;
+
+        // Scrollable list
+        float listH = panelH - 50;
+        float rowH = 32;
+        int itemCount = 10; // your data count
+        float contentH = itemCount * rowH;
+
+        _scrollPos = GUI.BeginScrollView(
+            new Rect(px, y, panelW, listH), _scrollPos,
+            new Rect(0, 0, panelW - 20, contentH));
+
+        for (int i = 0; i < itemCount; i++)
+        {
+            float ry = i * rowH;
+            if (i % 2 == 0) GUI.Box(new Rect(0, ry, panelW - 20, rowH), "");
+            if (GUI.Button(new Rect(0, ry, panelW - 20, rowH), "", GUIStyle.none))
+                OnItemClicked(i);
+            GUI.Label(new Rect(8, ry + 4, panelW - 40, rowH - 8),
+                "Item " + i, _labelStyle);
+        }
+
+        GUI.EndScrollView();
+        GUI.matrix = oldMatrix;
+    }
+
+    private void OnItemClicked(int index) { /* handle click */ }
+
+    private void InitStyles()
+    {
+        if (_stylesInit) return;
+        _stylesInit = true;
+        _labelStyle = new GUIStyle(GUI.skin.label)
+            { fontSize = 14 };
+        _labelStyle.normal.textColor = Color.white;
+        _buttonStyle = new GUIStyle(GUI.skin.button)
+            { fontSize = 14 };
+        _titleStyle = new GUIStyle(GUI.skin.label)
+            { fontSize = 18, fontStyle = FontStyle.Bold };
+        _titleStyle.normal.textColor = new Color(0.78f, 0.86f, 1f);
+        _boxStyle = new GUIStyle(GUI.skin.box);
+    }
+}
+```
+
+### Opening from a Block
+
+```csharp
+// In your Block class OnBlockActivated:
+MyModBrowserIMGUI.Instance.Open();
+```
+
+No XUi XML registration needed — no `windows.xml`, no `xui.xml`, no window groups.
+
+### Key IMGUI Rules
+
+- **Scale 2x** — game resolution makes default IMGUI tiny; use `GUI.matrix` to scale
+- **panelH ≤ 280** (at 2x scale = 560px) — keeps the window within the HUD bars
+- **`DontDestroyOnLoad`** — prevents the GameObject from being destroyed on scene changes
+- **`Input.ResetInputAxes()`** — prevents player movement while the window is open
+- **`SetControllable(false/true)`** — locks/unlocks player movement and camera
+- **Singleton pattern** — one instance, created on first access
+- **`[Preserve]` attribute** — prevents Unity IL stripping
+- **MainThreadDispatcher** — if using background threads (e.g. TCP fetches), you must initialize a dispatcher MonoBehaviour and use it to marshal callbacks to the main thread
+
+### When to Use XUi vs IMGUI
+
+| Use Case | Approach |
+|---|---|
+| Clickable lists, text-heavy windows | **IMGUI** — text always renders correctly |
+| Simple buttons with icons only | XUi works fine (no text rendering issues) |
+| Integration with vanilla UI (toolbelt, HUD) | XUi required (must patch existing windows) |
+| Quick prototyping | **IMGUI** — no XML files, no registration |
+
+---
+
 ## Gotchas & Lessons Learned
 
 > **Grid templates are NOT auto-cloned without `repeat_content="true"`** — without this attribute the template child element exists exactly once, so `GetChildrenByType<RowController>` finds only 1 entry regardless of `rows=`. Always add `repeat_content="true"` to `<grid>` elements that use a single template row. Also set `visible="false"` on the template so empty rows stay hidden until `SetData` makes them visible.
@@ -534,3 +697,7 @@ In `xui.xml` you can set the global UI scale for the ruleset:
 > **Custom buttons without white background**: Buttons always have a white sprite. To create a styled button, layer: background `<sprite>` → invisible `<button style="press" color="0,0,0,0"/>` → icon `<sprite>` → `<label>`. The button captures clicks while the sprite provides the visual.
 
 > **`color` on `<button>` does NOT tint the background.** Buttons always render with their default white/light sprite regardless of the `color` attribute. To get readable text on buttons, use a separate `<label>` child with `color="[black]"` (dark text on light button) rather than relying on the button's own text rendering or background tinting. For colored swatches (e.g. a palette), use `<rect style="press">` with a `<sprite color="R,G,B,A" type="sliced" />` child instead of a `<button>` — sprites properly render the color, and `style="press"` makes the rect clickable via `OnPress`.
+
+> **Text inside `<button>` and `<rect>` containers is frequently invisible in mod windows.** Despite correct depth ordering, color values, and label positioning, child labels inside buttons render as blank white rows. This affects both `<button>` elements (which render an opaque white background covering children) and `<rect>` elements (which may render unexpected white backgrounds). Multiple approaches were tested (dark sprites, flat labels, different depths) — none reliably showed text. **Use Unity IMGUI (OnGUI) instead** — see the "Recommended Alternative" section above.
+
+> **Changing an XUi controller class to a non-XUiController (e.g. MonoBehaviour) causes `InvalidCastException` in `XUiFromXml.LoadXui`.** If a class name previously used as a `controller=""` attribute still exists in the DLL but no longer extends `XUiController`, the XUi loader may find it by name, try to cast it, and crash — even if no XML references it anymore. Rename the class to avoid conflicts.
