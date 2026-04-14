@@ -658,6 +658,7 @@ No XUi XML registration needed — no `windows.xml`, no `xui.xml`, no window gro
 - **Singleton pattern** — one instance, created on first access
 - **`[Preserve]` attribute** — prevents Unity IL stripping
 - **MainThreadDispatcher** — if using background threads (e.g. TCP fetches), you must initialize a dispatcher MonoBehaviour and use it to marshal callbacks to the main thread
+- **`OnGUI` runs multiple times per frame** (Layout + Repaint passes). Never use `Input.GetMouseButtonDown()` or manual `Input.mousePosition` hit-testing inside `OnGUI` — they behave inconsistently across passes. For hold-to-repeat buttons, use `GUI.RepeatButton()` and gate on `Event.current.type == EventType.Repaint` to fire once per frame. Do not build custom hold-tracking with `Input.GetMouseButton()` — it fires on every pass and accumulates incorrectly.
 
 ### When to Use XUi vs IMGUI
 
