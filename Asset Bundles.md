@@ -258,3 +258,12 @@ For `Shape="ModelEntity"` blocks:
 > **Dedicated server** — Don't load visual assets (particles, audio) on dedicated servers. Guard with `if (GameManager.IsDedicatedServer) return;`
 
 > **Bundle file location** — The game resolves `#@modfolder:` to the mod's root directory. Place bundles in `Resources/` by convention.
+
+> **Don't overwrite FBX-embedded materials** — If the FBX came with per-part colors/materials (common for multi-piece models like phones, weapons, vehicles), do **not** loop `renderer.sharedMaterial = someMat` in your setup script. That flattens the whole model to one material. Only replace materials when the FBX has none and you need to inject one (e.g. a single-material model like the NES console). To keep the FBX materials on the prefab and include them in the asset bundle, set on the `ModelImporter`:
+> ```csharp
+> importer.materialImportMode = ModelImporterMaterialImportMode.ImportStandard;
+> importer.materialLocation   = ModelImporterMaterialLocation.InPrefab;
+> importer.materialName       = ModelImporterMaterialName.BasedOnMaterialName;
+> importer.materialSearch     = ModelImporterMaterialSearch.Local;
+> ```
+> `InPrefab` keeps the materials as sub-assets of the FBX, so they travel with the prefab into the bundle as dependencies. No separate material extraction needed.

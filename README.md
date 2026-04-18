@@ -20,11 +20,13 @@ Shared knowledgebase for 7DTD mod development. Used by multiple projects (7nes, 
 
 - [XUi - Window System](XUi%20-%20Window%20System.md) — XML window definitions, elements, colors, styles, controls
 - [XUi - Controllers (C#)](XUi%20-%20Controllers%20(C%23).md) — C# XUiController subclasses, bindings, events
+- [HUD Safe Zones](HUD%20Safe%20Zones.md) — Top DAY/TIME strip + bottom message/toolbelt strip must not be overlapped by IMGUI or non-HUD-hiding windows
 
 ## Prefab & Binary Formats
 
 - [TTS File Format](TTS%20File%20Format.md) — TerraTerrain Storage binary format (voxel grid)
 - [NIM File Format](NIM%20File%20Format.md) — Name Index Map binary format (block ID → name)
+- [Pregen World Format](Pregen%20World%20Format.md) — `Data/Worlds/` folder layout; `main.ttw` header gotcha
 - [Block Data Structures](Block%20Data%20Structures.md) — Key data structures for prefab import
 - [Block Definition Resolution](Block%20Definition%20Resolution.md) — How block IDs resolve to definitions
 - [Prefab Import Pipeline](Prefab%20Import%20Pipeline.md) — Full flow from prefab selection to placed voxels
