@@ -39,6 +39,44 @@ Windows are added in two places:
 
 ---
 
+## `windowManager.Open(name, bool)` — what the second arg does
+
+`GUIWindowManager.Open(string name, bool playOpenSound = true)` — the second bool is **not** "close other groups." Observed behavior from clicking a custom paging-header button that calls `wm.Open("myGroup", <bool>)`:
+
+- **`true`** — closes the compass, the toolbelt hint area, `windowpaging` (the top paging-icon strip), and any currently-open sibling content group before opening. The opened group renders "alone."
+- **`false`** — leaves the compass open. Does **not** re-open `windowpaging` if it was closed, and closing a sibling content group elsewhere in your handler can still cascade `windowpaging` shut.
+
+So `false` is necessary but not sufficient to keep the top paging header visible alongside a custom content group. You also have to avoid a path that lets `windowpaging` close in the first place. The clean fix is to let vanilla `WindowSelector` (the controller on `windowPagingHeader`) handle the click rather than going through `wm.Open` directly — see the paging-button section below.
+
+---
+
+## Adding a button to `windowPagingHeader`
+
+Vanilla `windowPagingHeader` has `controller="WindowSelector"`. `WindowSelector` auto-wires every child `<button>` so that clicking the button opens a `window_group` whose name matches the button name **lowercased** (e.g. button `Skills` → group `skills`).
+
+Do **not** give your button its own `controller=` attribute — that preempts `WindowSelector`'s auto-wiring and forces you into a manual `wm.Open` path which closes `windowpaging` as a side effect. Just rely on the naming convention:
+
+```xml
+<append xpath="/windows/window[@name='windowPagingHeader']">
+    <button pos="171,-21" name="MyTab"
+            sprite="my_icon"
+            tooltip_key="xuiMyTab"
+            style="press, hover, paging.window.icon" />
+</append>
+```
+
+```xml
+<window_group name="mytab" controller="MyTabWindowGroup, MyMod">
+    <window name="windowMyTabList" />
+</window_group>
+```
+
+Button name `MyTab` → `WindowSelector` opens group `mytab`. The header stays visible because `WindowSelector` routes through its paging-aware internal flow rather than a raw `wm.Open`.
+
+**Do not** add `windowPagingHeader` as a `<window>` child of your own group. `WindowSelector`'s `OnOpen` auto-selects a default tab (first child button, usually Crafting), which calls `wm.Open("crafting", true)`, which closes your group, which tries to pop an action set that no longer belongs to it — `LocalPlayerInput::Pop - Tried to pop a different action set` — and the cascade loops until the native stack overflows.
+
+---
+
 ## Window Attributes
 
 | Attribute | Values | Notes |
