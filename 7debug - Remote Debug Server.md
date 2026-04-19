@@ -45,6 +45,8 @@ All connected players with position, health, stamina, level.
 }
 ```
 
+Position/rotation are live world coordinates from `EntityAlive.position`. See [Entity Positions](Entity%20Positions.md) for axis conventions, sanity ranges, and the origin-reposition behavior that affects Unity transforms but not this API.
+
 ### GET /api/world
 World info: name, seed, size, game day/hour, difficulty, entity and chunk counts.
 ```json
@@ -117,6 +119,15 @@ Response includes captured log output:
   "output": ["1 players connected:", "0. id=171, ..."]
 }
 ```
+
+### POST /api/reloadgame
+Exits the current game, waits for the main menu, then reloads the same save. Picks up all XML changes (XUi, blocks, items, recipes, localization) without restarting the game process. Does NOT reload C# DLLs — those require a full restart.
+
+Send an empty body `{}`.
+```json
+{"status": "reloading", "world": "Juvupe Valley", "game": "derp"}
+```
+**Note:** Only works when already in a game (`inGame: true`). Use `/api/loadgame` if on the main menu.
 
 ### GET /api/saves
 List all saved games, sorted by most recently modified.

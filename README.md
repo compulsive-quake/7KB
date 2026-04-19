@@ -13,6 +13,7 @@ Shared knowledgebase for 7DTD mod development. Used by multiple projects (7nes, 
 - [Items](Items.md) — Custom item definitions, icons (ItemIconAtlas), dynamic item generation
 - [Power Sources](Power%20Sources.md) — Custom power generators, TileEntityPowerSource, fuel management, power system C# internals
 - [Entities](Entities.md) — Custom entity classes (NPCs, zombies, animals), AI tasks, drops
+- [Networking - Connecting and Chat](Networking%20-%20Connecting%20and%20Chat.md) — ConnectionManager, sending chat via NetPackageChat, JSON escape gotcha in 7debug's /api/command
 - [Asset Bundles](Asset%20Bundles.md) — Loading custom models, particles, sounds from .unity3d bundles
 - [Paint & Textures](Paint%20%26%20Textures.md) — Block paint texture IDs and the paint system
 
@@ -31,7 +32,8 @@ Shared knowledgebase for 7DTD mod development. Used by multiple projects (7nes, 
 
 ## Coordinate & Rotation Systems
 
-- [Coordinate System](Coordinate%20System.md) — Positions, transforms, grid iteration
+- [Coordinate System](Coordinate%20System.md) — Prefab grid, transforms, TTS iteration order
+- [Entity Positions](Entity%20Positions.md) — Live runtime world coordinates, origin reposition, sanity ranges, JSON serialization gotchas
 - [Rotation System](Rotation%20System.md) — 24 discrete block orientations
 - [Rotation Types](Rotation%20Types.md) — Per-block rotation constraints
 - [Multi-Block Rotation](Multi-Block%20Rotation.md) — How rotation affects multi-cell blocks

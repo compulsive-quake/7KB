@@ -513,6 +513,22 @@ In `xui.xml` you can set the global UI scale for the ruleset:
 
 > **`<rect>` does not render visually.** Putting `color=` or `sprite=` on a `<rect>` does nothing useful. Use a `<sprite>` child element inside the rect for any background fill.
 
+> **The `window name` in `windows.xml` must match the `<window name="">` in `xui.xml`** — the `window_group name` is what you pass to `windowManager.Open()`, but the `<window name="">` child inside the group must exactly match the `name` attribute in `windows.xml`. The `controller` attribute is independent — it maps to the C# class name. These are three different names that serve different purposes:
+> ```xml
+> <!-- windows.xml: defines the window layout -->
+> <window name="myWindow" controller="MyController" ...>
+>
+> <!-- xui.xml: registers the window group -->
+> <window_group name="myWindowGroup">
+>     <window name="myWindow" />  <!-- must match windows.xml name -->
+> </window_group>
+>
+> <!-- C#: open by window_group name -->
+> playerUI.windowManager.Open("myWindowGroup", true);
+> ```
+
+> **Labels with `text="{binding}"` won't render in mod controllers** — the binding system calls `GetBindingValue` through base-class references, so mod overrides via `new` are not dispatched. Labels will show as white rectangles if they have binding text that doesn't resolve. Use `text=""` (empty) in XML and set text programmatically via `XUiV_Label.Text` in the controller. See XUi - Controllers (C#).md for the workaround.
+
 > **Adding `sprite="UISprite"` to a `<rect>` will render a plain white box** that covers everything underneath, since the `color` tint is not applied to rect elements — only to `<sprite>` elements.
 
 > **`open_anywhere="true"` is not a valid window attribute** in 7DTD XUi. Remove it.
@@ -534,3 +550,14 @@ In `xui.xml` you can set the global UI scale for the ruleset:
 > **Custom buttons without white background**: Buttons always have a white sprite. To create a styled button, layer: background `<sprite>` → invisible `<button style="press" color="0,0,0,0"/>` → icon `<sprite>` → `<label>`. The button captures clicks while the sprite provides the visual.
 
 > **`color` on `<button>` does NOT tint the background.** Buttons always render with their default white/light sprite regardless of the `color` attribute. To get readable text on buttons, use a separate `<label>` child with `color="[black]"` (dark text on light button) rather than relying on the button's own text rendering or background tinting. For colored swatches (e.g. a palette), use `<rect style="press">` with a `<sprite color="R,G,B,A" type="sliced" />` child instead of a `<button>` — sprites properly render the color, and `style="press"` makes the rect clickable via `OnPress`.
+
+> **Centering text on buttons**: To make a clickable button with centered text, use a `<rect style="press">` containing a `<sprite>` for the background and a `<label>` for the text. The label must have: (1) `justify="center"` for horizontal centering, (2) `width` matching the parent rect's width, and (3) `pos="0,0"` or vertical offset calculated as `(rectHeight - labelHeight) / 2` for vertical centering. Example:
+> ```xml
+> <rect name="btnAction" depth="6" pos="10,-10" width="120" height="32"
+>       style="press" sound="craft_click_craft">
+>     <sprite depth="7" sprite="menu_empty3px" color="60,140,60,220" type="sliced" />
+>     <label depth="8" pos="0,-1" width="120" height="32"
+>            font_size="15" color="255,255,255,255" justify="center" text="Click Me" />
+> </rect>
+> ```
+> Key points: the label `width` must equal the rect `width` for `justify="center"` to center properly. If the label has a left-offset `pos` (e.g. `pos="10,0"`) or a narrower `width` than its parent, the text will appear off-center. Do NOT use `<button>` for styled buttons — it renders a white background that ignores the `color` attribute.

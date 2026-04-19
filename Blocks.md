@@ -116,6 +116,8 @@ The game **prepends `ui_game_symbol_`** to the icon name. So `"hand"` resolves t
 
 Common built-in icons: `hand`, `electric_switch`, `server_search`, `hammer`, `campfire`, `forge`, `workbench`, `map`, `skills`, `quest`, `lock`, `search`, `camera`, `drop_item`, `rotate_simple`, `paint_bucket`, `zombie`, `lightbulb`, `character`, `players`, `chat`, `all_blocks`, `copy_shape`, `x`.
 
+Full list of `ui_game_symbol_*` icons available in the UIAtlas (as of V2.6 b14): `add`, `agility`, `all_blocks`, `allies`, `armor_iron`, `arrow_left`, `arrow_max`, `arrow_menu`, `arrow_right`, `assemble`, `backpack`, `block_damage`, `block_repair`, `book`, `brick`, `cement`, `chair`, `challenge`, `character`, `check`, `climb`, `clock`, `coin`, `compass`, `computer`, `cookware`, `crops`, `defense`, `destruction`, `diamond`, `door`, `drop`, `electric_max_power`, `electric_plugin`, `electric_power`, `electric_switch`, `fire`, `foliage`, `forge`, `fork`, `frames`, `gas`, `go_to_button`, `hammer`, `hand`, `ibeam`, `junk_turret`, `knife`, `lightbulb`, `lock`, `loot_sack`, `map`, `map_bed`, `map_campsite`, `map_cave`, `map_cursor`, `map_house`, `map_player_arrow`, `map_town`, `map_trader`, `map_waypoint_remove`, `map_waypoint_set`, `medical`, `mic`, `minibike`, `modded`, `noise`, `other`, `pack_mule`, `paint_brush`, `paint_bucket`, `pen`, `percent`, `perk`, `ping`, `player`, `players`, `quest`, `quest_limited`, `quest_remove`, `radiation`, `report`, `resource`, `rifle`, `science`, `search`, `seats`, `service`, `shape_ammo`, `shape_factory`, `shape_outdoor_props`, `shape_schematics`, `shirt`, `shopping_cart`, `sight`, `signs`, `skills`, `skull`, `sort`, `speed`, `stealth`, `store_all_down`, `store_all_up`, `store_similar_down`, `store_similar_up`, `subtract`, `swap`, `teleport`, `temperature`, `tool`, `tool_smithing`, `traps`, `trash`, `treasure`, `tree`, `trophy`, `unlock`, `vending`, `wardrobe`, `wind`, `windows`, `wood`, `wrench`, `x`, `zombie`.
+
 ### Localization
 The radial menu looks up `blockcommand_{commandName}` in localization. Add entries in `Config/localization.txt`:
 ```
@@ -164,6 +166,30 @@ The `_interaction` string in `OnBlockActivated` corresponds to the interaction t
 - `"E"` — default activate (press E)
 
 Return `true` to consume the activation event (prevents default behavior).
+
+---
+
+## Activation Text Action Descriptors
+
+When returning text from `GetActivationText`, you can embed keybind placeholders that the game resolves to the player's current key binding. The format is:
+
+```
+[action:actionSetName:ActionName]
+```
+
+The game expects a **colon** separator between the action set name and the action name. Using `[action:activate]` (no set name) causes:
+```
+WRN [XUi] Could not parse action descriptor in label text, no separator between action set name and action found
+```
+
+**Correct format** — use both `local` and `permanent` action sets together:
+```csharp
+__result = "Press [action:local:Activate][action:permanent:Activate] to use My Block";
+```
+
+This renders the correct keybind for both keyboard/mouse (local) and gamepad (permanent) input.
+
+> **Gotcha:** The action name is case-sensitive. Use `Activate` (capital A), not `activate`.
 
 ---
 

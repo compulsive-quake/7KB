@@ -304,7 +304,7 @@ Patch all three overloads: `GetType(string)`, `GetType(string, bool)`, `GetType(
 
 > **`[Preserve]` attribute** — Add to `IModApi` and block classes. Unity's IL stripping can remove classes only referenced via reflection/XML.
 
-> **Reflection parameter names** — Use positional injection (`string __0`) rather than named parameters in Harmony patches on system methods (e.g., `Type.GetType`). Mono's internal parameter names may differ from the documentation.
+> **Parameter names must match exactly** — Harmony matches patch method parameters to the original method **by name**. If the original uses `_clrIdx` and your patch says `_cIdx`, Harmony throws `Parameter "_cIdx" not found`. **Worse: different overloads of the same method can use different names for the same parameter.** For example, `Block.OnBlockActivated(WorldBase, int, Vector3i, BlockValue, EntityPlayerLocal)` uses `_clrIdx`, but `Block.OnBlockActivated(string, WorldBase, int, Vector3i, BlockValue, EntityPlayerLocal)` uses `_cIdx` for the same int. **Best practice: always use positional injection** (`__0`, `__1`, `__2`, etc.) which matches by position and is immune to naming inconsistencies. Only use named parameters when you've verified the exact name via decompilation (e.g. dnSpy).
 
 > **Server vs client** — Many patches need `if (ConnectionManager.Instance.IsServer)` or `if (GameManager.IsDedicatedServer)` guards. Power generation runs on server; visual effects run on client.
 
