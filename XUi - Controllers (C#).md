@@ -235,6 +235,20 @@ public class XUiC_MyRowController : XUiController
 
 ---
 
+## Recommended Alternative: IMGUI Controllers
+
+Due to persistent text rendering issues in XUi mod windows (labels inside buttons/rects are invisible), **Unity IMGUI (`MonoBehaviour` + `OnGUI`) is the recommended approach** for mod windows with clickable lists or text-heavy UI. See [XUi - Window System.md](XUi%20-%20Window%20System.md) for the full IMGUI pattern and code template.
+
+Key differences from XUi controllers:
+- Extends `MonoBehaviour`, not `XUiController`
+- No XML registration — no `windows.xml`, no `xui.xml`
+- Open from blocks via `MyBrowserIMGUI.Instance.Open()` instead of `windowManager.Open()`
+- Uses singleton pattern with `DontDestroyOnLoad`
+- Must lock player controls manually (`SetControllable(false)`) and show cursor
+- Background thread callbacks need `MainThreadDispatcher` (must be initialized in `IModApi.InitMod`)
+
+---
+
 ## Gotchas & Lessons Learned
 
 > **`GetBindingValue` uses `new`, not `override`** — the base class method is not marked `virtual`. Attempting `override` causes CS0506 compile error.

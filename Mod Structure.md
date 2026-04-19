@@ -129,3 +129,33 @@ See `build.ps1` in the project root. After any code or XML change, always run:
 powershell -ExecutionPolicy Bypass -File build.ps1
 ```
 The game loads from its own `Mods/` directory — the project directory is not used at runtime.
+
+---
+
+## Dedicated Server Deployment
+
+The dedicated server is a **separate Steam app** with its own install directory (typically `7 Days To Die Dedicated Server/`). It has its own `Mods/` folder that is independent of the client game's `Mods/` folder.
+
+**Critical:** When connecting to a dedicated server, the server sends the block/item ID map to clients. **Clients receive block definitions from the server, not from their own local config files.** If a block is defined in the client's mod but not in the server's mod, the client will never see it — it won't appear in the creative menu, `giveself` won't work, and it can't be placed.
+
+### Deploy to Both
+
+Any mod that defines blocks, items, recipes, or localization must be deployed to **both** locations:
+
+```
+Client:  <7DTD Install>/Mods/YourMod/
+Server:  <7DTD Dedicated Server Install>/Mods/YourMod/
+```
+
+All `Config/` XML files and `Localization.txt` must match between client and server. DLLs should also be deployed to both (server needs them for block classes, Harmony patches, etc.).
+
+### Starting the Dedicated Server
+
+The dedicated server must be started from its own install directory — `startdedicated.bat` resolves paths relative to its working directory:
+
+```bash
+cd "<7DTD Dedicated Server Install>"
+./startdedicated.bat
+```
+
+Starting it from a different working directory will cause config loading failures.

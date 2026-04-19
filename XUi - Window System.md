@@ -39,6 +39,44 @@ Windows are added in two places:
 
 ---
 
+## `windowManager.Open(name, bool)` — what the second arg does
+
+`GUIWindowManager.Open(string name, bool playOpenSound = true)` — the second bool is **not** "close other groups." Observed behavior from clicking a custom paging-header button that calls `wm.Open("myGroup", <bool>)`:
+
+- **`true`** — closes the compass, the toolbelt hint area, `windowpaging` (the top paging-icon strip), and any currently-open sibling content group before opening. The opened group renders "alone."
+- **`false`** — leaves the compass open. Does **not** re-open `windowpaging` if it was closed, and closing a sibling content group elsewhere in your handler can still cascade `windowpaging` shut.
+
+So `false` is necessary but not sufficient to keep the top paging header visible alongside a custom content group. You also have to avoid a path that lets `windowpaging` close in the first place. The clean fix is to let vanilla `WindowSelector` (the controller on `windowPagingHeader`) handle the click rather than going through `wm.Open` directly — see the paging-button section below.
+
+---
+
+## Adding a button to `windowPagingHeader`
+
+Vanilla `windowPagingHeader` has `controller="WindowSelector"`. `WindowSelector` auto-wires every child `<button>` so that clicking the button opens a `window_group` whose name matches the button name **lowercased** (e.g. button `Skills` → group `skills`).
+
+Do **not** give your button its own `controller=` attribute — that preempts `WindowSelector`'s auto-wiring and forces you into a manual `wm.Open` path which closes `windowpaging` as a side effect. Just rely on the naming convention:
+
+```xml
+<append xpath="/windows/window[@name='windowPagingHeader']">
+    <button pos="171,-21" name="MyTab"
+            sprite="my_icon"
+            tooltip_key="xuiMyTab"
+            style="press, hover, paging.window.icon" />
+</append>
+```
+
+```xml
+<window_group name="mytab" controller="MyTabWindowGroup, MyMod">
+    <window name="windowMyTabList" />
+</window_group>
+```
+
+Button name `MyTab` → `WindowSelector` opens group `mytab`. The header stays visible because `WindowSelector` routes through its paging-aware internal flow rather than a raw `wm.Open`.
+
+**Do not** add `windowPagingHeader` as a `<window>` child of your own group. `WindowSelector`'s `OnOpen` auto-selects a default tab (first child button, usually Crafting), which calls `wm.Open("crafting", true)`, which closes your group, which tries to pop an action set that no longer belongs to it — `LocalPlayerInput::Pop - Tried to pop a different action set` — and the cascade loops until the native stack overflows.
+
+---
+
 ## Window Attributes
 
 | Attribute | Values | Notes |
@@ -507,6 +545,170 @@ In `xui.xml` you can set the global UI scale for the ruleset:
 
 ---
 
+## Recommended Alternative: Unity IMGUI (OnGUI)
+
+XUi has persistent, hard-to-debug issues with text rendering inside `<button>` and `<rect>` containers — labels inside buttons are frequently invisible regardless of depth, color, or layout settings. After extensive testing, **Unity IMGUI (`OnGUI`) is the recommended approach for mod windows** that need clickable lists, text, or interactive elements.
+
+IMGUI bypasses XUi entirely and renders reliably every time. The 7Window ScreenAlignTool uses this approach successfully.
+
+### IMGUI Window Pattern (Known Good Starting Point)
+
+```csharp
+using System.Collections.Generic;
+using UnityEngine;
+using UnityEngine.Scripting;
+
+[Preserve]
+public class MyModBrowserIMGUI : MonoBehaviour
+{
+    private static MyModBrowserIMGUI _instance;
+    public static MyModBrowserIMGUI Instance
+    {
+        get
+        {
+            if (_instance == null)
+            {
+                var go = new GameObject("MyModBrowserIMGUI");
+                _instance = go.AddComponent<MyModBrowserIMGUI>();
+                DontDestroyOnLoad(go);
+            }
+            return _instance;
+        }
+    }
+
+    private bool _active;
+    private Vector2 _scrollPos;
+    private GUIStyle _labelStyle, _buttonStyle, _titleStyle, _boxStyle;
+    private bool _stylesInit;
+
+    public void Open()
+    {
+        _active = true;
+        _scrollPos = Vector2.zero;
+        var player = GameManager.Instance?.World?.GetPrimaryPlayer();
+        if (player != null) player.SetControllable(false);
+        Cursor.visible = true;
+        Cursor.lockState = CursorLockMode.None;
+    }
+
+    public void Close()
+    {
+        _active = false;
+        var player = GameManager.Instance?.World?.GetPrimaryPlayer();
+        if (player != null) player.SetControllable(true);
+    }
+
+    void Update()
+    {
+        if (!_active) return;
+        Cursor.visible = true;
+        Cursor.lockState = CursorLockMode.None;
+        if (Input.GetKeyDown(KeyCode.Escape)) Close();
+        Input.ResetInputAxes();
+    }
+
+    void OnGUI()
+    {
+        if (!_active) return;
+        InitStyles();
+
+        // 2x scale for readability
+        const float scale = 2f;
+        var oldMatrix = GUI.matrix;
+        GUI.matrix = Matrix4x4.TRS(
+            Vector3.zero, Quaternion.identity, new Vector3(scale, scale, 1f));
+
+        float panelW = 320, panelH = 280;
+        float px = (Screen.width / scale - panelW) / 2f;
+        float py = (Screen.height / scale - panelH) / 2f;
+
+        // Dark background (doubled for opacity)
+        GUI.Box(new Rect(px - 10, py - 10, panelW + 20, panelH + 20), "", _boxStyle);
+        GUI.Box(new Rect(px - 10, py - 10, panelW + 20, panelH + 20), "", _boxStyle);
+
+        float y = py;
+
+        // Title + close button
+        GUI.Label(new Rect(px, y, panelW - 60, 30), "My Window", _titleStyle);
+        if (GUI.Button(new Rect(px + panelW - 30, y, 30, 25), "X", _buttonStyle))
+            Close();
+        y += 35;
+
+        // Scrollable list
+        float listH = panelH - 50;
+        float rowH = 32;
+        int itemCount = 10; // your data count
+        float contentH = itemCount * rowH;
+
+        _scrollPos = GUI.BeginScrollView(
+            new Rect(px, y, panelW, listH), _scrollPos,
+            new Rect(0, 0, panelW - 20, contentH));
+
+        for (int i = 0; i < itemCount; i++)
+        {
+            float ry = i * rowH;
+            if (i % 2 == 0) GUI.Box(new Rect(0, ry, panelW - 20, rowH), "");
+            if (GUI.Button(new Rect(0, ry, panelW - 20, rowH), "", GUIStyle.none))
+                OnItemClicked(i);
+            GUI.Label(new Rect(8, ry + 4, panelW - 40, rowH - 8),
+                "Item " + i, _labelStyle);
+        }
+
+        GUI.EndScrollView();
+        GUI.matrix = oldMatrix;
+    }
+
+    private void OnItemClicked(int index) { /* handle click */ }
+
+    private void InitStyles()
+    {
+        if (_stylesInit) return;
+        _stylesInit = true;
+        _labelStyle = new GUIStyle(GUI.skin.label)
+            { fontSize = 14 };
+        _labelStyle.normal.textColor = Color.white;
+        _buttonStyle = new GUIStyle(GUI.skin.button)
+            { fontSize = 14 };
+        _titleStyle = new GUIStyle(GUI.skin.label)
+            { fontSize = 18, fontStyle = FontStyle.Bold };
+        _titleStyle.normal.textColor = new Color(0.78f, 0.86f, 1f);
+        _boxStyle = new GUIStyle(GUI.skin.box);
+    }
+}
+```
+
+### Opening from a Block
+
+```csharp
+// In your Block class OnBlockActivated:
+MyModBrowserIMGUI.Instance.Open();
+```
+
+No XUi XML registration needed — no `windows.xml`, no `xui.xml`, no window groups.
+
+### Key IMGUI Rules
+
+- **Scale 2x** — game resolution makes default IMGUI tiny; use `GUI.matrix` to scale
+- **panelH ≤ 280** (at 2x scale = 560px) — keeps the window within the HUD bars
+- **`DontDestroyOnLoad`** — prevents the GameObject from being destroyed on scene changes
+- **`Input.ResetInputAxes()`** — prevents player movement while the window is open
+- **`SetControllable(false/true)`** — locks/unlocks player movement and camera
+- **Singleton pattern** — one instance, created on first access
+- **`[Preserve]` attribute** — prevents Unity IL stripping
+- **MainThreadDispatcher** — if using background threads (e.g. TCP fetches), you must initialize a dispatcher MonoBehaviour and use it to marshal callbacks to the main thread
+- **`OnGUI` runs multiple times per frame** (Layout + Repaint passes). Never use `Input.GetMouseButtonDown()` or manual `Input.mousePosition` hit-testing inside `OnGUI` — they behave inconsistently across passes. For hold-to-repeat buttons, use `GUI.RepeatButton()` and gate on `Event.current.type == EventType.Repaint` to fire once per frame. Do not build custom hold-tracking with `Input.GetMouseButton()` — it fires on every pass and accumulates incorrectly.
+
+### When to Use XUi vs IMGUI
+
+| Use Case | Approach |
+|---|---|
+| Clickable lists, text-heavy windows | **IMGUI** — text always renders correctly |
+| Simple buttons with icons only | XUi works fine (no text rendering issues) |
+| Integration with vanilla UI (toolbelt, HUD) | XUi required (must patch existing windows) |
+| Quick prototyping | **IMGUI** — no XML files, no registration |
+
+---
+
 ## Gotchas & Lessons Learned
 
 > **Grid templates are NOT auto-cloned without `repeat_content="true"`** — without this attribute the template child element exists exactly once, so `GetChildrenByType<RowController>` finds only 1 entry regardless of `rows=`. Always add `repeat_content="true"` to `<grid>` elements that use a single template row. Also set `visible="false"` on the template so empty rows stay hidden until `SetData` makes them visible.
@@ -561,3 +763,5 @@ In `xui.xml` you can set the global UI scale for the ruleset:
 > </rect>
 > ```
 > Key points: the label `width` must equal the rect `width` for `justify="center"` to center properly. If the label has a left-offset `pos` (e.g. `pos="10,0"`) or a narrower `width` than its parent, the text will appear off-center. Do NOT use `<button>` for styled buttons — it renders a white background that ignores the `color` attribute.
+
+> **Changing an XUi controller class to a non-XUiController (e.g. MonoBehaviour) causes `InvalidCastException` in `XUiFromXml.LoadXui`.** If a class name previously used as a `controller=""` attribute still exists in the DLL but no longer extends `XUiController`, the XUi loader may find it by name, try to cast it, and crash — even if no XML references it anymore. Rename the class to avoid conflicts.
