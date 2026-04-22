@@ -160,6 +160,27 @@ Common useful commands:
 - `spawnentity <id> <x> <y> <z>` — spawn entity at position
 - `give <item> <count>` — give items to player
 - `teleport <x> <y> <z>` — teleport player
+- **`xui reload`** — re-parse every XUi window group from disk (layouts, styles, localization, custom atlas sprites) without restarting the game. Primary tool for fast XML-edit iteration from an AI agent; see the XUi Window System doc's *Hot-Reloading XUi* section for what does and doesn't reload.
+
+### Iterating on XUi edits without a restart
+
+```bash
+# 1. Sync the changed file(s) into the deployed mod folder
+cp MyMod/Config/XUi/windows.xml "C:/Program Files (x86)/Steam/steamapps/common/7 Days To Die/Mods/MyMod/Config/XUi/windows.xml"
+
+# 2. Reload XUi remotely
+curl -s -X POST http://localhost:7860/api/command \
+  -H "Content-Type: application/json" \
+  -d '{"command":"xui reload"}'
+# -> {"command":"xui reload","output":[]}
+
+# 3. Verify success in the log (look for "Parsing all window groups completed")
+curl -s http://localhost:7860/api/console | jq '.log[-10:] | .[].message'
+```
+
+`xui reload` prints its progress via game `INF` logs, not via the captured command buffer — so `output` in the HTTP response is expected to be empty. Check `/api/console` to confirm the reload actually ran.
+
+Full restart is still required when editing mod DLLs (controllers, Harmony patches), `items.xml`, `blocks.xml`, `recipes.xml`, or anything baked during initial game load.
 
 ## Usage from other mods / tools
 

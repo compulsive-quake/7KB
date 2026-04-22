@@ -39,6 +39,51 @@ Windows are added in two places:
 
 ---
 
+## Hot-Reloading XUi (no game restart)
+
+The in-game console command is **`xui reload`** (two words, with a space — *not* `xuireload`). It re-parses every window group's XML tree from disk and rebuilds the live UI, usually in well under a second. Look for this line in the log to confirm:
+
+```
+INF [XUi] Parsing all window groups completed in NNN ms total.
+```
+
+### What reloads, what doesn't
+
+Reloads live:
+- `Config/XUi/windows.xml` — layouts, positions, colors, depths, text keys
+- `Config/XUi/xui.xml` — window group registrations
+- `Config/XUi/styles.xml` — named color tokens
+- `Config/XUi/controls.xml` — reusable control templates
+- `Config/Localization.txt` — label strings
+- `UIAtlases/ItemIconAtlas/*.png` and `UIAtlases/UIAtlas/*.png` — custom sprites (close and reopen the window to force the atlas lookup to re-fetch)
+
+Does **not** reload — still requires a full restart:
+- Mod `.dll` files (controllers, Harmony patches, `IModApi` hooks) — DLLs are loaded once per process
+- `Config/items.xml`, `blocks.xml`, `recipes.xml`, etc. — game data, baked on load
+
+### Typical XML-edit iteration loop
+
+1. Edit the XML / atlas PNG in the mod source directory.
+2. Copy the changed file(s) into the game's `Mods/<ModName>/` tree (e.g. run `deploy.sh` without quitting, or `cp` the single file).
+3. Open the console (`F1`) and run `xui reload`.
+4. Close and reopen the affected window to see the change.
+
+### Triggering from outside the game (7debug)
+
+If `7debug` is installed, you can hot-reload remotely (from a terminal, script, or AI agent) without ever focusing the game window:
+
+```bash
+curl -s -X POST http://localhost:7860/api/command \
+  -H "Content-Type: application/json" \
+  -d '{"command":"xui reload"}'
+```
+
+Expect `{"command":"xui reload","output":[]}` in the HTTP response — `xui reload` prints progress to the game log rather than the command-capture buffer. Verify by reading `/api/console` and looking for the `Parsing all window groups completed` line.
+
+This lets an agent iterate on an XUi layout without paying the multi-minute quit → launch → load-save cycle every time.
+
+---
+
 ## `windowManager.Open(name, bool)` — what the second arg does
 
 `GUIWindowManager.Open(string name, bool playOpenSound = true)` — the second bool is **not** "close other groups." Observed behavior from clicking a custom paging-header button that calls `wm.Open("myGroup", <bool>)`:
@@ -91,6 +136,27 @@ Button name `MyTab` → `WindowSelector` opens group `mytab`. The header stays v
 | `depth` | int | Z-order |
 
 > `open_anywhere="true"` is **not** a valid attribute — omit it.
+
+### Gotcha: `pos` and `anchor` are ignored on `<window panel="Center">`
+
+When a window uses `panel="Center"`, the Center panel auto-centers it and the `pos` and `anchor` attributes on the `<window>` element have **no visible effect**. Changing `pos="0,0"` to `pos="300,-200"` or `anchor="CenterCenter"` to `anchor="CenterBottom"` produces the same render.
+
+Confirmed empirically: only child-element `pos` attributes shift things on screen. The window itself is locked to its panel.
+
+**Workaround — shift content inside the window with a `<rect>` wrapper:**
+
+```xml
+<window name="myWindow" width="280" height="900" pos="0,0" anchor="CenterCenter"
+        panel="Center" ...>
+  <rect name="contentShift" pos="0,-160" width="280" height="580">
+    <!-- all original children here, unchanged -->
+  </rect>
+</window>
+```
+
+The rect's `pos` shifts its children visually (child pos is relative to parent). Increase the window's `height` if necessary so the shifted content doesn't clip against the window's bottom edge.
+
+This is the only reliable way to reposition a `panel="Center"` window's visible content — modifying `pos`/`anchor` on the window itself does nothing.
 
 ---
 
@@ -194,6 +260,23 @@ Use it to group and position child elements.
 <label text="[DECEA3]Price[-]: 100" />
 <label text="[FFD200]Gold[-] or [FF2400]Red[-]" />
 ```
+
+**HUD-style black drop shadow / outline on text:**
+
+For light labels that sit over an unpredictable background (wallpaper, game world, photo) — e.g. iOS-style app labels, floating HUD readouts — add a black outline so the text stays readable without a solid panel behind it. This is the same treatment the vanilla `DAY: N  TIME: hh:mm  temp°F` strip uses.
+
+```xml
+<label name="appLabel" pos="20,-208" width="100" height="22"
+       font_size="18" color="250,250,252,255" justify="center"
+       effect="outline" effect_color="0,0,0,255" effect_distance="1,1"
+       text_key="zPhone_AppRetroZed" depth="5" />
+```
+
+- `effect="outline"` — enables the outline/shadow pass (`"shadow"` is also accepted for a one-sided drop shadow).
+- `effect_color` — the outline color (`0,0,0,255` for a hard black outline).
+- `effect_distance="1,1"` — pixel offset; `1,1` is a tight HUD-style shadow, `2,2` is a heavier readout, `0,1` is a drop shadow only below the text.
+
+The `style="outline"` alternative attribute in the table above is a shortcut that points at the same effect but with less control over color and distance.
 
 ---
 
@@ -749,7 +832,13 @@ No XUi XML registration needed — no `windows.xml`, no `xui.xml`, no window gro
 
 > **Sliced sprites for UI panels**: Use `type="sliced"` for backgrounds and borders. This does 9-slice scaling so edges don't stretch. Common sprites: `ui_game_panel_header`, `ui_game_panel_bg`, `menu_empty3px`. Set `fillcenter="true"` or `fillcenter="false"` to control center fill.
 
-> **Custom buttons without white background**: Buttons always have a white sprite. To create a styled button, layer: background `<sprite>` → invisible `<button style="press" color="0,0,0,0"/>` → icon `<sprite>` → `<label>`. The button captures clicks while the sprite provides the visual.
+> **Custom buttons with icons / transparent corners**: A `<button>` ships with a default white background sprite. If you place an icon `<sprite>` as a child of the button, any transparent pixels in the icon (e.g. rounded corners on a squircle app icon) will reveal that white bg underneath. The **working fix is to set `sprite="..."` (plus `atlas="..."` if needed) directly on the `<button>`** — the icon becomes the button's own visual, so there is no white bg layer above or below it. Example:
+> ```xml
+> <button name="appRetroZed" pos="20,-100" width="100" height="100"
+>         sprite="zphone_app_retrozed" atlas="ItemIconAtlas"
+>         depth="3" style="press" sound="[paging_click]" />
+> ```
+> The often-suggested inverse pattern — putting a `<sprite>` first and layering an "invisible" `<button color="0,0,0,0">` on top to capture clicks — does **not** work in current 7DTD XUi: the button still renders its default white sprite and covers the icon entirely. `color="0,0,0,0"` does not hide the button's background (see the `color` gotcha below). Always drive the icon via the button's own `sprite=` attribute instead.
 
 > **`color` on `<button>` does NOT tint the background.** Buttons always render with their default white/light sprite regardless of the `color` attribute. To get readable text on buttons, use a separate `<label>` child with `color="[black]"` (dark text on light button) rather than relying on the button's own text rendering or background tinting. For colored swatches (e.g. a palette), use `<rect style="press">` with a `<sprite color="R,G,B,A" type="sliced" />` child instead of a `<button>` — sprites properly render the color, and `style="press"` makes the rect clickable via `OnPress`.
 
