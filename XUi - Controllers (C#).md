@@ -290,3 +290,101 @@ Key differences from XUi controllers:
 > **The `[Preserve]` attribute** — Add `[Preserve]` (from `UnityEngine.Scripting`) to any class referenced only via XML `controller=""` attributes or reflection. Unity's IL stripping may remove classes that aren't directly referenced from code.
 
 > **`OnOpen()` fires children-first** — child controllers' `OnOpen()` runs before the parent window's `OnOpen()`. If a child (e.g., a grid) needs data populated by the parent, do NOT read it in the child's `OnOpen()`. Instead, have the parent explicitly call a method on the child *after* preparing the data in its own `OnOpen()`.
+
+## iOS-style toggle (slide switch) pattern
+
+Use this when you want a binary on/off control that visibly slides like an iOS toggle. Layout: a button hosts two pairs of sprites (track + knob) that the controller swaps via `XUiV_Sprite.IsVisible`. The whole row is the button so the click target is generous.
+
+### XML
+
+Track is `menu_empty3px` (rounded-corner sliced rect). Knob is `ui_game_filled_circle` (truly round). Toggle widget on the LEFT of the label is the conventional layout we use; flip the x-coordinates if you want it on the right.
+
+```xml
+<button name="myToggle" pos="20,-104" width="240" height="32" depth="3"
+        style="press, hover" hoverscale="1.02" sound="[paging_click]">
+    <sprite depth="0" name="rowBg" pos="0,0" width="240" height="32"
+            color="30,30,40,200" type="sliced" sprite="menu_empty" />
+    <!-- Track: rounded pill, 54×24 starting at x=4 -->
+    <sprite depth="1" name="trackOff" pos="4,-4" width="54" height="24"
+            color="70,70,85,255"   type="sliced" sprite="menu_empty3px" />
+    <sprite depth="1" name="trackOn"  pos="4,-4" width="54" height="24"
+            color="80,180,100,255" type="sliced" sprite="menu_empty3px" visible="false" />
+    <!-- Knob: 20×20 circle. Off-x=6, On-x=36 (24 px slide inside the track). -->
+    <sprite depth="2" name="knobOff" pos="6,-6"  width="20" height="20"
+            color="240,240,245,255" sprite="ui_game_filled_circle" />
+    <sprite depth="2" name="knobOn"  pos="36,-6" width="20" height="20"
+            color="255,255,255,255" sprite="ui_game_filled_circle" visible="false" />
+    <label name="myLabel" pos="68,-6" width="160" height="22"
+           font_size="15" color="240,240,240,255" justify="left"
+           text_key="MyToggleLabel" depth="3" />
+</button>
+```
+
+### Controller
+
+```csharp
+struct Toggle {
+    public XUiV_Sprite TrackOff, KnobOff, TrackOn, KnobOn;
+    public void Apply(bool on) {
+        if (TrackOff != null) TrackOff.IsVisible = !on;
+        if (KnobOff  != null) KnobOff.IsVisible  = !on;
+        if (TrackOn  != null) TrackOn.IsVisible  = on;
+        if (KnobOn   != null) KnobOn.IsVisible   = on;
+    }
+}
+
+bool _wired;
+Toggle _myToggle;
+
+public override void Init() {
+    base.Init();
+    if (_wired) return;     // see "double-fire" gotcha below
+    _wired = true;
+
+    var btn = GetChildById("myToggle");
+    if (btn != null) {
+        _myToggle.TrackOff = btn.GetChildById("trackOff")?.ViewComponent as XUiV_Sprite;
+        _myToggle.TrackOn  = btn.GetChildById("trackOn")?.ViewComponent  as XUiV_Sprite;
+        _myToggle.KnobOff  = btn.GetChildById("knobOff")?.ViewComponent  as XUiV_Sprite;
+        _myToggle.KnobOn   = btn.GetChildById("knobOn")?.ViewComponent   as XUiV_Sprite;
+        btn.OnPress += (_, __) => {
+            MyState = !MyState;
+            _myToggle.Apply(MyState);
+        };
+    }
+}
+
+public override void OnOpen() {
+    base.OnOpen();
+    _myToggle.Apply(MyState);   // sync visuals from the source of truth
+}
+```
+
+### Gotchas
+
+- **Double-fire on click**: `Init()` can run more than once for the same controller (XUi may re-parse the window or re-call Init on first OnOpen). Without a `_wired` flag every press fires twice (fields toggle, then toggle back, net no change). Symptom in logs: two consecutive `[mod] toggle Foo ok=True new=True` / `new=False` pairs ~2 ms apart.
+- **OnPress signature** is `(XUiController _sender, int _mouseButton)` — the int is which mouse button (0/1/2), *not* a press-state boolean. A single click fires it once.
+- **Pivot**: leaving `pivot` unset works for these full-row buttons; do not set `pivot="topleft"` unless your child positions match that origin.
+- **Hover scaling**: `hoverscale="1.0"` may make NGUI skip the hover state and break input. Use `hoverscale="1.02"` (almost imperceptible) when you want minimal hover animation but reliable click handling.
+- **Track length vs knob slide**: knob On-x = trackPos.x + (trackWidth − knobWidth − inset). For a 54-wide track with 20-wide knob and 6 px inset on each side: knob-off-x=trackX+2, knob-on-x=trackX+32. Adjust if you change track width.
+- **Source of truth**: keep the toggle state in a static field / model object. The controller only renders. After every press, call `Apply()` so the visuals match the new value.
+
+## ⚠️ Don't declare `controller=` on both the window_group AND the window
+
+A window_group registered in `xui.xml` and the matching `<window>` definition in `windows.xml` will both instantiate their own controller if both carry a `controller="..."` attribute. The button OnPress events end up wired *twice* — once per instance — and every click flips the state twice for a net no-op. Symptom in logs: `OnOpen` (or any Init log) firing twice per app open, and every press logging twice ~1 ms apart.
+
+**Single source of truth**: declare the controller on the window_group only, leave it off the `<window>` element.
+
+```xml
+<!-- xui.xml -->
+<window_group name="zPhoneBandits" controller="BanditsAppController, zPhone">
+    <window name="zPhoneBandits" />
+</window_group>
+
+<!-- windows.xml — NO controller= here -->
+<window name="zPhoneBandits" width="280" height="900" ...>
+    ...
+</window>
+```
+
+This applies to any window — not just toggles. Buttons that just open another window won't visibly misbehave from the duplicate (calling `Open` twice is idempotent), so the bug hides until you have a toggle or counter that flips.

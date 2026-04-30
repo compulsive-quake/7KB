@@ -22,6 +22,7 @@ Shared knowledgebase for 7DTD mod development. Used by multiple projects (7nes, 
 - [XUi - Window System](XUi%20-%20Window%20System.md) — XML window definitions, elements, colors, styles, controls
 - [XUi - Controllers (C#)](XUi%20-%20Controllers%20(C%23).md) — C# XUiController subclasses, bindings, events
 - [HUD Safe Zones](HUD%20Safe%20Zones.md) — Top DAY/TIME strip + bottom message/toolbelt strip must not be overlapped by IMGUI or non-HUD-hiding windows
+- [IMGUI Tracker Stack](IMGUI%20Tracker%20Stack.md) — Right-side stacked status cards for tracked entities (HP bar + status text + fade in/out). Reusable IMGUI/OnGUI pattern as alternative to XUi for HUDs
 
 ## Prefab & Binary Formats
 
