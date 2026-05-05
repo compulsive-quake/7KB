@@ -196,3 +196,115 @@ Anything beyond that (extra rows, icons, animated borders) is up to the mod.
 - **`OnGUI` runs on the client only** — don't gate on `IsServer`/`IsDedicatedServer`; the dedicated server has no Screen and won't call OnGUI anyway.
 - **One MonoBehaviour per Hud** — don't try to share one OnGUI across multiple unrelated tracker stacks; let each mod own its own HUD GameObject.
 - **Texture leaks across reloads** — the `_solidTex` cache is `static`, so its textures survive even if the GameObject is destroyed. That's fine for a small palette (~10 colors) but don't store per-entity textures in it.
+
+---
+
+## IMGUI Tool Overlays (sliders, alignment panels)
+
+The tracker pattern above is read-only — pure display. The same `OnGUI` hook is also used for **interactive tool overlays** like alignment panels and live-tuning sliders (e.g. zPhone's `JigsawTuneTool`, `ScepterScaleSliderTool`, RetroZed's `ArcadeAlignTool`). They share the same gotchas plus a few unique to interactive IMGUI.
+
+### Always allow manual number entry next to drag/step controls
+
+Any alignment or tuning panel that exposes a numeric value (scale, rotation, offset, position, color channel, etc.) **must** include a typeable text field, not just `+`/`-`/`<<`/`>>` step buttons or a drag slider. Stepping is fine for "nudge to taste"; typing is the only way to enter an exact value or paste one back from a saved-values dump. Skipping the text field forces the user to spam-click step buttons to reach a known value, which is slow and error-prone.
+
+Layout per row: `<<` (hold-rewind) / `-` / **editable text field** / `+` / `>>` (hold-ffwd). The text field absorbs whatever width is left after the four 30-px buttons.
+
+```csharp
+// One tunable row. Returns next Y.
+float DrawRow(float px, float y, float panelW, string label, string fmt,
+              float step, string fieldName, ref string text)
+{
+    GUI.Label(new Rect(px, y, panelW, 22), label, _label);
+    y += 22;
+
+    const float bw = 30f, gap = 6f;
+    float tw = panelW - (bw * 4 + gap * 4);
+    float xRewind = px;
+    float xMinus  = xRewind + bw + gap;
+    float xText   = xMinus  + bw + gap;
+    float xPlus   = xText   + tw + gap;
+    float xFfwd   = xPlus   + bw + gap;
+
+    float current = GetFloat(fieldName);
+
+    // <<  hold-rewind: gate on Repaint so we don't fire 200×/sec.
+    if (GUI.RepeatButton(new Rect(xRewind, y, bw, 28), "<<", _btn)
+        && Event.current.type == EventType.Repaint)
+        SetFloat(fieldName, current -= step);
+
+    if (GUI.Button(new Rect(xMinus, y, bw, 28), "-", _btn))
+        SetFloat(fieldName, current -= step);
+
+    // Forgiving parse: hold partial input ("", "-", "1.") until it's
+    // a complete float distinct from the current value. Without this,
+    // typing "1.05" gets clobbered to 1 the moment you type "1".
+    if (text == null) text = current.ToString(fmt, CultureInfo.InvariantCulture);
+    string newText = GUI.TextField(new Rect(xText, y, tw, 28), text, _txt);
+    if (newText != text)
+    {
+        text = newText;
+        string trimmed = newText.Trim();
+        if (trimmed.Length > 0 && trimmed != "-" && !trimmed.EndsWith(".") &&
+            float.TryParse(trimmed, NumberStyles.Float, CultureInfo.InvariantCulture, out float parsed) &&
+            !Mathf.Approximately(parsed, current))
+        {
+            SetFloat(fieldName, parsed);
+        }
+    }
+
+    if (GUI.Button(new Rect(xPlus, y, bw, 28), "+", _btn))
+        SetFloat(fieldName, current += step);
+
+    if (GUI.RepeatButton(new Rect(xFfwd, y, bw, 28), ">>", _btn)
+        && Event.current.type == EventType.Repaint)
+        SetFloat(fieldName, current += step);
+
+    return y + 32;
+}
+```
+
+After +/-/Reset/external mutation, re-sync the local text mirrors so the field reflects the new authoritative value (e.g. `_scaleText = GetFloat("Scale").ToString(fmt, CultureInfo.InvariantCulture)`). Reference: `zPhone/src/apps/Jigsaw/JigsawTuneTool.cs::DrawRow`.
+
+### IMGUI does **not** block parallel `Input.*` readers
+
+`Event.current.Use()` consumes the event for the IMGUI dispatch but does **not** suppress `Input.GetMouseButtonDown(int)` / `Input.GetKeyDown(KeyCode)` reads happening that same frame on other MonoBehaviours. Two systems both see the click.
+
+This bites any mod that has an input listener (zPhone's `ZPhoneKeyListener`, RetroZed's arcade-key hook, etc.) AND an interactive IMGUI tool. Symptoms:
+
+- Click an IMGUI button → the listener also reacts → an unrelated phone/window opens, or fires the listener's primary action a second time.
+- Clicking IMGUI close + immediate reopen looks like the panel is "flickering".
+
+**Fix**: each interactive IMGUI tool exposes a static `IsOpen` accessor so other systems can short-circuit while it's up. Critically, the accessor must NOT instantiate the singleton — only read its cached instance:
+
+```csharp
+public class JigsawTuneTool : MonoBehaviour
+{
+    static JigsawTuneTool _instance;
+    bool _active;
+
+    // null-safe — does not call Instance, so reading from the listener
+    // doesn't spawn the GameObject before the user opens the tool.
+    public static bool IsOpen => _instance != null && _instance._active;
+}
+```
+
+Then any cross-cutting input reader gates on it:
+
+```csharp
+private void TryOpenPhone()
+{
+    if (JigsawTuneTool.IsOpen) return;
+    if (ScepterScaleSliderTool.IsOpen) return;
+    // … rest of the open logic
+}
+```
+
+If you add a new interactive IMGUI tool, give it an `IsOpen` accessor and add it to every existing input listener's gate list. Reference: `zPhone/src/ZPhoneKeyListener.cs::TryOpenPhone`.
+
+### Other interactive-IMGUI gotchas
+
+- **`Cursor.visible = true; Cursor.lockState = CursorLockMode.None`** in `Update` while active — the game re-locks the cursor every frame, so set them once in `Open()` AND keep enforcing them in `Update()`.
+- **`Input.ResetInputAxes()` each frame while active** — otherwise WASD held during typing keeps moving the player after the panel closes.
+- **`player.SetControllable(false)` on Open / `true` on Close** — stops attack/jump from firing through to the world while the panel has focus.
+- **ESC to close** — `if (Input.GetKeyDown(KeyCode.Escape)) Close();` in `Update`. Don't rely on the close button alone; users expect ESC.
+- **Eat the event at the end of `OnGUI`** — `if (Event.current is { isKey: true } or { isMouse: true } or …) Event.current.Use();` so IMGUI input doesn't trigger map/inventory shortcuts. (This still doesn't block parallel `Input.*` readers — see above.)

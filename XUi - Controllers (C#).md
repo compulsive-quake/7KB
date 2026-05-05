@@ -371,9 +371,27 @@ public override void OnOpen() {
 
 ## ⚠️ Don't declare `controller=` on both the window_group AND the window
 
-A window_group registered in `xui.xml` and the matching `<window>` definition in `windows.xml` will both instantiate their own controller if both carry a `controller="..."` attribute. The button OnPress events end up wired *twice* — once per instance — and every click flips the state twice for a net no-op. Symptom in logs: `OnOpen` (or any Init log) firing twice per app open, and every press logging twice ~1 ms apart.
+A window_group registered in `xui.xml` and the matching `<window>` definition in `windows.xml` will both instantiate their own controller if both carry a `controller="..."` attribute. The button OnPress events end up wired *twice* — once per instance — and every click runs the handler twice. The `_wired` re-entry guard does NOT help here because each duplicate instance has its own `_wired` field.
 
-**Single source of truth**: declare the controller on the window_group only, leave it off the `<window>` element.
+**Always pick one place. Never put `controller="..."` in both files for the same window.**
+
+### Symptom checklist
+
+The bug is not always visible — it depends on what the handler does:
+
+| Handler does… | What you see |
+|---|---|
+| Toggles a bool (`MyState = !MyState`) | Net no-op — flips twice per click. Easy to miss; looks like the button is broken. |
+| Calls `windowManager.Open("foo")` | Hidden — Open is idempotent. Bug stays latent until you add a toggle/counter/spawn. |
+| Spawns/removes/sends an entity or message | Visibly happens twice (two zombies, two chat lines, double damage). The most obvious tell. |
+| Logs from inside the handler | Two log lines ~1 ms apart per press. Same for `OnOpen`/`Init` logs at window open. |
+| Opens an IMGUI tool overlay then `Close()`s the phone window | Phone window flickers — opens then immediately closes again because the second handler runs on the same click. |
+
+If you suspect this bug, add `Log.Out("[mod] MyApp Init");` to `Init()` and open the window once. Two lines = double-instantiated.
+
+### Single source of truth
+
+Declare the controller on the window_group only, leave it off the `<window>` element.
 
 ```xml
 <!-- xui.xml -->
@@ -387,4 +405,4 @@ A window_group registered in `xui.xml` and the matching `<window>` definition in
 </window>
 ```
 
-This applies to any window — not just toggles. Buttons that just open another window won't visibly misbehave from the duplicate (calling `Open` twice is idempotent), so the bug hides until you have a toggle or counter that flips.
+When adding a new app window, leave a comment above the `<window>` tag explaining *why* `controller=` is intentionally absent — future-you won't remember and may "fix" it back.
