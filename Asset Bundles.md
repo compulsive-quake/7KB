@@ -247,6 +247,75 @@ For `Shape="ModelEntity"` blocks:
 
 ---
 
+## Sizing imported models correctly (1 unit = 1 metre)
+
+7DTD treats **1 Unity unit as 1 metre**. A motorcycle is ~2.4–2.6m on its longest axis, a player ~1.85m, a 4×4 truck ~4.5m. Get this wrong and your prefab spawns the size of a house (real example: an Oppressor MK II shipped at 200m because three independent corrections stacked on each other).
+
+### Three things that decide imported size
+
+1. **Source-file unit.** FBX from Blender exports in metres by default. DAE/COLLADA carries `<unit name="meter" meter="0.01"/>` (Sketchfab exports default to centimetres). Don't trust the source-file unit to mean what you think — measure the imported result.
+2. **`ModelImporter.useFileScale` + `globalScale`.** With `useFileScale = true`, Unity honours the file's unit (works for clean Blender FBX). With `useFileScale = false`, Unity ignores the file's unit and multiplies by `globalScale`.
+3. **Any `localScale` on the prefab wrapper.** This compounds with the importer scale and is the easiest place to introduce a sizing bug.
+
+### Single-source-of-truth recipe
+
+**Pick ONE of `useFileScale=true` OR `useFileScale=false` + a single `globalScale`. Never combine import-time scaling with a runtime fit pass — the errors compound.**
+
+```csharp
+static void ConfigureModelImporter(string daePath)
+{
+    var importer = AssetImporter.GetAtPath(daePath) as ModelImporter;
+    importer.useFileScale = false;
+    importer.globalScale  = 1.3f;  // tuned empirically — see assertion below
+    importer.isReadable   = true;
+    importer.SaveAndReimport();
+}
+```
+
+The wrapper prefab stays at `localScale = (1,1,1)`. No runtime rescale.
+
+### Assert, don't silently rescale
+
+After import, **measure** the renderer bounds and warn if they're off — but never silently multiply onto `wrapper.localScale` based on `Renderer.bounds`. World-space bounds can be stale right after instantiation, and a wrong measurement cascades into a 10–100× sizing bug.
+
+```csharp
+const float TargetLongestAxisMeters = 2.6f; // motorcycle-sized
+
+static void AssertScaleNearTarget(Transform wrapper)
+{
+    var renderers = wrapper.GetComponentsInChildren<Renderer>(true);
+    if (renderers.Length == 0) return;
+
+    Bounds b = renderers[0].bounds;
+    for (int i = 1; i < renderers.Length; i++) b.Encapsulate(renderers[i].bounds);
+
+    float longest = Mathf.Max(b.size.x, Mathf.Max(b.size.y, b.size.z));
+    float ratio   = longest / TargetLongestAxisMeters;
+    Debug.Log($"Imported longest-axis {longest:F3}m (target {TargetLongestAxisMeters}m, ratio {ratio:F2}×).");
+
+    if (ratio < 0.8f || ratio > 1.2f)
+    {
+        Debug.LogWarning(
+            $"Imported size {longest:F3}m is >20% off target {TargetLongestAxisMeters}m. " +
+            $"Adjust ModelImporter.globalScale by {1f/ratio:F3}× and re-bake. " +
+            "Do NOT add a runtime rescale.");
+    }
+}
+```
+
+### Tuning workflow
+
+1. Bake the bundle once with `globalScale = 1`. Read the assertion log.
+2. The log says e.g. `Imported longest-axis 200.000m (target 2.6m, ratio 76.92×)`. Multiply your current globalScale by `1/ratio`: `1 / 76.92 ≈ 0.013`. Set `globalScale = 0.013`. (Or if you started at 100, set it to `100 × 0.013 = 1.3`.)
+3. Re-bake. Confirm the log now reads `ratio 1.00×`.
+4. Open the Unity scene with the prefab. **Drop a 1.85m capsule next to it. Eyeball.** If you can't visually verify motorcycle-scale in the editor, no in-game test will save you.
+
+### Optional: ship a runtime ModelScale knob for playtest
+
+A `ModelScale` slider on the entity's tunable API (default 1.0, range 0.02–4.0) is cheap insurance for finding the *gameplay-correct* size after the bake is technically right. Once you find the value that feels right, **bake it back into `globalScale` and reset the slider default to 1.0** — the slider is a tuning knob, not a load-bearing fix.
+
+---
+
 ## Gotchas
 
 > **Missing T_Block tag** — If your ModelEntity block renders but can't be interacted with in-game, the prefab's root GameObject is likely missing the `T_Block` tag. Ensure the 7DTD TagManager.asset is installed and the root is tagged.
@@ -258,6 +327,8 @@ For `Shape="ModelEntity"` blocks:
 > **Dedicated server** — Don't load visual assets (particles, audio) on dedicated servers. Guard with `if (GameManager.IsDedicatedServer) return;`
 
 > **Bundle file location** — The game resolves `#@modfolder:` to the mod's root directory. Place bundles in `Resources/` by convention.
+
+> **Don't combine import-time scaling with a runtime fit pass** — measuring `Renderer.bounds` right after `PrefabUtility.InstantiatePrefab` and multiplying onto `wrapper.localScale` can produce wildly wrong sizes (a 2.6m bike became 200m in one real case). Set sizing via `ModelImporter.globalScale` at import time, then *assert* the result instead of silently fixing it.
 
 > **Don't overwrite FBX-embedded materials** — If the FBX came with per-part colors/materials (common for multi-piece models like phones, weapons, vehicles), do **not** loop `renderer.sharedMaterial = someMat` in your setup script. That flattens the whole model to one material. Only replace materials when the FBX has none and you need to inject one (e.g. a single-material model like the NES console). To keep the FBX materials on the prefab and include them in the asset bundle, set on the `ModelImporter`:
 > ```csharp

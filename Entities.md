@@ -2,6 +2,8 @@
 
 Part of the [7DTD Modding Knowledgebase](README.md). Covers custom entity classes (NPCs, animals, zombies) defined via `Config/entityclasses.xml`.
 
+For drivable vehicles (motorcycles, cars, hover bikes, mounts) see [Vehicles](Vehicles.md) — vehicles are a specialised `EntityVehicle` subtree with their own `vehicles.xml` schema, attach/seat pipeline, and camera handling.
+
 ---
 
 ## Defining a Custom Entity
