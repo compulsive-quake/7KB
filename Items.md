@@ -161,3 +161,98 @@ public void InitMod(Mod _modInstance)
 This technique is useful when item definitions depend on user-provided content (e.g., ROM files, custom textures) that isn't known at build time. The generated XML is picked up by the normal config loading pipeline.
 
 Similarly, localization entries can be appended to `Config/Localization.txt` during `InitMod()` before the game reads it.
+
+---
+
+## Editor-Friendly Items.xml Model
+
+When building tooling around `Config/items.xml`, treat an item as a mix of known structured fields plus preserved raw XML. The common modlet form is an XPath patch document:
+
+```xml
+<configs>
+    <append xpath="/items">
+        <item name="myCustomItem">
+            <property name="Meshfile" value="Items/Misc/oilGP" />
+            <property name="Stacknumber" value="64" />
+        </item>
+    </append>
+</configs>
+```
+
+Some sources and generated files may instead use a full `<items>` root. A safe editor should support both, but new mod items are usually best written as `<append xpath="/items">` patches so they merge cleanly with vanilla XML.
+
+### Core Field Meanings
+
+| Field | XML | Meaning |
+|---|---|---|
+| Internal name | `<item name="...">` | Unique item ID used by recipes, loot, effects, console commands, icons, localization, and XPath selectors. |
+| Extends | `Extends` | Inherits another item, then overrides selected properties. Convenient, but fragile when vanilla names change. |
+| Tags | `Tags` | Comma-separated labels used by crafting, skills, repair/mod rules, actions, buffs, search, and item modifiers. |
+| Group | `Group` | Creative/crafting category grouping. Items without a useful group may only be discoverable by search. |
+| Display type | `DisplayType` | UI presentation template for inventory and tooltip display. |
+| Description key | `DescriptionKey` | Localization key for the item's description text. |
+| Class | `Class` | Engine item behavior class, such as food, medical, weapon, armor, quest item, or generic item. |
+| Material | `Material` | Material definition used for sounds, physics, damage behavior, and some interactions. |
+| Custom icon | `CustomIcon` | Uses another item/icon name for the inventory icon. If omitted, the game looks for an icon matching the item name. |
+| Custom icon tint | `CustomIconTint` | RGB/accepted color tint applied to the inventory icon. White means no visible tint. |
+| Mesh file | `Meshfile` | Held/world model path. For custom assets, this can point into an asset bundle with `#@modfolder:` syntax. |
+| Drop mesh file | `DropMeshfile` | Model used when the item is dropped in the world. |
+| Hold type | `HoldType` | Numeric animation/holding style used by the player model. |
+| Stack number | `Stacknumber` | Maximum inventory stack size. |
+| Economic value | `EconomicValue` | Base trader value before quality, perks, and modifiers. |
+| Sellable to trader | `SellableToTrader` | Whether traders can buy this item. |
+| Creative mode | `CreativeMode` | Controls creative-menu visibility, commonly player-visible or developer/admin-only. |
+
+### Durability, Quality, And Repair
+
+| Field | XML | Meaning |
+|---|---|---|
+| Degradation max | `DegradationMax` | Durability range or maximum durability, often quality-scaled. |
+| Degradation per use | `DegradationPerUse` | Durability lost per use/action. |
+| Degradation breaks after | `DegradationBreaksAfter` | Whether the item breaks at zero durability. |
+| Quality tier | `QualityTier` | Quality/progression bucket used by generated item stats. |
+| Mod slots | `ModSlots` | Number of modifier slots, commonly quality-scaled. |
+| Repair tools | `RepairTools` | Items required or consumed to repair this item. |
+| Repair amount | `RepairAmount` | Durability restored by a repair action or repair ingredient. |
+
+### Actions And Effects
+
+Items often contain nested action and effect data that should not be flattened too aggressively:
+
+```xml
+<property class="Action0">
+    <property name="Class" value="Ranged" />
+    <property name="Magazine_size" value="12" />
+    <property name="Magazine_items" value="ammo9mmBulletBall" />
+    <property name="Reload_time" value="2" />
+</property>
+
+<effect_group name="myItem">
+    <passive_effect name="DamageEntity" operation="base_set" value="30" />
+    <triggered_effect trigger="onSelfPrimaryActionEnd" action="AddBuff" buff="buffExample" />
+</effect_group>
+```
+
+Common action fields include `Action0`/`Action1` class, `Auto_fire`, `Magazine_size`, `Magazine_items`, `Reload_time`, `Range`, `DamageEntity`, `DamageBlock`, `AttacksPerMinute`, `StaminaUsage`, `Projectile`, and `CrosshairOnAim`.
+
+Common effect nodes include `effect_group`, `passive_effect`, `triggered_effect`, and `requirement`. Preserve unknown attributes and child nodes because many item behaviors are implemented by specialized action classes or version-specific effect fields.
+
+### Placement Items
+
+Items that place blocks usually point back into `blocks.xml`:
+
+| Field | XML | Meaning |
+|---|---|---|
+| Place as block | `PlaceAsBlock` | Block created when this item is placed into the world. |
+| Preview block | `PreviewBlock` | Block/model used for placement preview. |
+| Allowed placement | `Allowed_placement` | Rules for where and how the item can be placed. |
+| Use mode | `UseMode` | Engine placement/action mode for the item. |
+
+### WYSIWYG Editor Safety Rules
+
+- Preserve comments, unknown properties, unknown attributes, nested action classes, and effect groups.
+- Validate XML before saving, but only warn on unresolved references because another mod may provide the referenced item, block, material, buff, or asset.
+- Normalize booleans and casing to match the existing file style when possible.
+- Do not assume every numeric-looking value is a single number; 7DTD often uses ranges or comma-separated values such as durability ranges and RGB colors.
+- Show XPath patch operations (`append`, `set`, `setattribute`, `remove`) as first-class operations, not just raw text.
+- Back up `Config/items.xml` before automated rewrites.

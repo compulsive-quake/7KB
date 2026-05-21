@@ -187,3 +187,30 @@ Custom sounds go in `Config/sounds.xml`:
 - Audio must be inside a `.unity3d` asset bundle in the `Resources/` folder
 - `heat_map_strength` controls how much noise the sound generates (attracts zombies)
 - `Loop="true"` for ambient/looping sounds
+
+---
+
+## Targeting Items
+
+New items are normally appended to `/items`:
+
+```xml
+<configs>
+    <append xpath="/items">
+        <item name="myCustomItem">
+            <property name="Meshfile" value="Items/Misc/oilGP" />
+            <property name="Stacknumber" value="64" />
+        </item>
+    </append>
+</configs>
+```
+
+To edit a property on an existing item, target the item by internal name and then the property by `name`:
+
+```xml
+<configs>
+    <set xpath="/items/item[@name='resourceWood']/property[@name='Stacknumber']/@value">1000</set>
+</configs>
+```
+
+Use `/items/item[@name='itemName']` for item selectors. Use `/blocks/block[@name='blockName']` for block selectors. Do not mix the two: items live in `items.xml`, blocks live in `blocks.xml`, though placeable items may reference blocks through properties such as `PlaceAsBlock`.
