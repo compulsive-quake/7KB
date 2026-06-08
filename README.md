@@ -62,3 +62,7 @@ Shared knowledgebase for 7DTD mod development. Used by multiple projects (7nes, 
 | Sound definitions | `Data/Config/sounds.xml` |
 | Loot table definitions | `Data/Config/loot.xml` |
 | Loading screen tips | `Data/Config/loadingscreen.xml` |
+
+## Tooling Notes
+
+- [ModForge UI Conventions](ModForge%20UI%20Conventions.md) — Compact modal sizing and typography conventions for the ModForge desktop app.

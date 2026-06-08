@@ -119,10 +119,15 @@ Common built-in icons: `hand`, `electric_switch`, `server_search`, `hammer`, `ca
 Full list of `ui_game_symbol_*` icons available in the UIAtlas (as of V2.6 b14): `add`, `agility`, `all_blocks`, `allies`, `armor_iron`, `arrow_left`, `arrow_max`, `arrow_menu`, `arrow_right`, `assemble`, `backpack`, `block_damage`, `block_repair`, `book`, `brick`, `cement`, `chair`, `challenge`, `character`, `check`, `climb`, `clock`, `coin`, `compass`, `computer`, `cookware`, `crops`, `defense`, `destruction`, `diamond`, `door`, `drop`, `electric_max_power`, `electric_plugin`, `electric_power`, `electric_switch`, `fire`, `foliage`, `forge`, `fork`, `frames`, `gas`, `go_to_button`, `hammer`, `hand`, `ibeam`, `junk_turret`, `knife`, `lightbulb`, `lock`, `loot_sack`, `map`, `map_bed`, `map_campsite`, `map_cave`, `map_cursor`, `map_house`, `map_player_arrow`, `map_town`, `map_trader`, `map_waypoint_remove`, `map_waypoint_set`, `medical`, `mic`, `minibike`, `modded`, `noise`, `other`, `pack_mule`, `paint_brush`, `paint_bucket`, `pen`, `percent`, `perk`, `ping`, `player`, `players`, `quest`, `quest_limited`, `quest_remove`, `radiation`, `report`, `resource`, `rifle`, `science`, `search`, `seats`, `service`, `shape_ammo`, `shape_factory`, `shape_outdoor_props`, `shape_schematics`, `shirt`, `shopping_cart`, `sight`, `signs`, `skills`, `skull`, `sort`, `speed`, `stealth`, `store_all_down`, `store_all_up`, `store_similar_down`, `store_similar_up`, `subtract`, `swap`, `teleport`, `temperature`, `tool`, `tool_smithing`, `traps`, `trash`, `treasure`, `tree`, `trophy`, `unlock`, `vending`, `wardrobe`, `wind`, `windows`, `wood`, `wrench`, `x`, `zombie`.
 
 ### Localization
-The radial menu looks up `blockcommand_{commandName}` in localization. Add entries in `Config/localization.txt`:
+The radial menu looks up `blockcommand_{commandName}` in localization for built-in block activation commands. If the key is missing, the radial menu displays the raw key, e.g. `blockcommand_my_action`.
+
+Add entries in `Config/Localization.txt` using the full vanilla localization CSV header/row width:
+```csv
+Key,File,Type,UsedInMainMenu,NoTranslate,english,Context / Alternate Text,german,spanish,french,italian,japanese,koreana,polish,brazilian,russian,turkish,schinese,tchinese
+blockcommand_my_action,UI,Radial blockcommand,,,My Action,,My Action,My Action,My Action,My Action,My Action,My Action,My Action,My Action,My Action,My Action,My Action,My Action
 ```
-blockcommand_my_action,blocks,Block,FALSE,FALSE,My Action
-```
+
+Do not use a shortened six-column localization file for radial command keys. It can fail to load the key correctly, leaving the radial menu with raw text such as `blockcommand_sentryLightTurnOff`.
 
 ### Custom icons
 

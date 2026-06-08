@@ -840,7 +840,21 @@ No XUi XML registration needed — no `windows.xml`, no `xui.xml`, no window gro
 > ```
 > The often-suggested inverse pattern — putting a `<sprite>` first and layering an "invisible" `<button color="0,0,0,0">` on top to capture clicks — does **not** work in current 7DTD XUi: the button still renders its default white sprite and covers the icon entirely. `color="0,0,0,0"` does not hide the button's background (see the `color` gotcha below). Always drive the icon via the button's own `sprite=` attribute instead.
 
-> **`color` on `<button>` does NOT tint the background.** Buttons always render with their default white/light sprite regardless of the `color` attribute. To get readable text on buttons, use a separate `<label>` child with `color="[black]"` (dark text on light button) rather than relying on the button's own text rendering or background tinting. For colored swatches (e.g. a palette), use `<rect style="press">` with a `<sprite color="R,G,B,A" type="sliced" />` child instead of a `<button>` — sprites properly render the color, and `style="press"` makes the rect clickable via `OnPress`.
+> **`color` on `<button>` does NOT tint the background.** Buttons always render with their default white/light sprite regardless of the `color` attribute. To get readable text on buttons, use a separate `<label>` child with explicit `depth` above the button and `color="[black]"` (dark text on light button), rather than relying on the button's own text rendering or background tinting:
+> ```xml
+> <button name="btnMinus" pos="38,-29" width="44" height="34" depth="4"
+>         pivot="center" hoverscale="1.05" style="press, hover">
+>     <label depth="8" pos="-22,11" width="44" height="24"
+>            justify="center" font_size="28" color="[black]" text="-" />
+> </button>
+> ```
+> For colored swatches (e.g. a palette), use `<rect style="press">` with a `<sprite color="R,G,B,A" type="sliced" />` child instead of a `<button>` — sprites properly render the color, and `style="press"` makes the rect clickable via `OnPress`.
+
+> **Button hover growth should be small and center-anchored.** The default hover effect can make tightly packed controls drift into neighbors or over the window edge. For compact option windows, set `hoverscale="1.05"` or lower and `pivot="center"` on each `<button>`. When switching a button to center pivot, move `pos` to the button center instead of its top-left corner: `centerX = left + width / 2`, `centerY = top - height / 2`. Child labels are then relative to the centered origin too; for a 44x34 button with a 44x24 label and 6 px top padding, use `pos="-22,11"` rather than `pos="0,-6"`. Leave enough inner padding for the 5% growth on all sides.
+
+> **Pad compact custom windows more than the minimum.** If a button sits only a few pixels from a window border, hover scaling and selection boxes can look clipped or crowded. Use at least 12-16 px of side padding for small XUi control panels, and increase the window/content width rather than letting hover growth overlap the border.
+
+> **Use literal `text="..."` for fixed one-off labels when localization is not needed.** `text_key="..."` is correct for translated UI, but if the key is missing/not loaded the UI shows the raw key (e.g. `sentryLightBeamHeader`). For fixed mod-only labels that do not need translation, literal `text="Beam Options"` avoids a localization dependency.
 
 > **Centering text on buttons**: To make a clickable button with centered text, use a `<rect style="press">` containing a `<sprite>` for the background and a `<label>` for the text. The label must have: (1) `justify="center"` for horizontal centering, (2) `width` matching the parent rect's width, and (3) `pos="0,0"` or vertical offset calculated as `(rectHeight - labelHeight) / 2` for vertical centering. Example:
 > ```xml

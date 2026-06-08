@@ -35,3 +35,16 @@ The rotation type determines which indices are available in:
 - [[Rotation System#Cycling Rotation (User Interaction)|Rotation cycling]] via Ctrl+scroll
 - Validation when placing blocks
 - Available options in the rotation UI
+
+## 7DTD XML Placement Radial
+
+For model blocks that need the held-`R` placement radial to expose advanced rotations, use block XML properties rather than a `rotationType` property:
+
+```xml
+<property name="OnlySimpleRotations" value="false"/>
+<property name="AllowedRotations" value="No45"/>
+```
+
+Observed vanilla example: `trackLight` uses `OnlySimpleRotations=false` and `AllowedRotations=No45` to allow all 24 non-45-degree orientations. This enables the Advanced placement radial mode, including upside-down/ceiling-capable rotations when the block's placement class allows them.
+
+The held-`R` Copy Rotation option is part of the same block placement radial system. If a custom placeable block is locked to simple rotations (`OnlySimpleRotations=true`), copied rotations and advanced placement choices may collapse back to the simple upright set.

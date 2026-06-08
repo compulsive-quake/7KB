@@ -42,6 +42,13 @@ Each rotation index maps to Euler angles `[rotX, rotY, rotZ]` in radians:
 - **North/South**: rotate around X by ±π/2, spin around Y
 - **East/West**: rotate around Z by ∓π/2, spin around X
 
+## Runtime Notes
+
+- Rotation indices `4-7` are the upside-down/ceiling-mounted face (`Down`). Use this when code needs ceiling-specific behavior.
+- For rotating/aiming block-attached transforms that can use advanced placement, prefer local-space direction math (`transform.InverseTransformDirection`) over subtracting world Euler angles. World Euler subtraction works for upright-only blocks, but breaks for ceiling-mounted blocks because pitch sign/range assumptions change.
+- For ceiling-mounted blocks (`rotation` 4-7), local pitch may use the opposite sign from upright placement. If an upright block accepts `centeredPitch - upRange` through `centeredPitch + downRange`, the ceiling-mounted equivalent often needs `centeredPitch - downRange` through `centeredPitch + upRange`.
+- For 360-degree yaw tracking, do not assign normalized yaw directly every frame. Use the closest equivalent angle to the current yaw, e.g. `current + Mathf.DeltaAngle(current, desired)`, so crossing `179` to `-179` does not become a full reverse turn.
+
 ## Applying Rotation to a Mesh
 
 ```javascript
