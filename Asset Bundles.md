@@ -220,6 +220,35 @@ foreach (var ps in particles)
 
 ## Unity Project Setup for 7DTD Prefabs
 
+### Headless build wrapper
+
+PowerShell wrappers that launch Unity batch mode should resolve the mod root from `MODFORGE_MOD_DIR` when present, otherwise from `$MyInvocation.MyCommand.Path`, and should read `UnityProject/ProjectSettings/ProjectVersion.txt` to find the intended Hub editor version. Accept both `UNITY_EXE` and `UNITY_EDITOR_PATH` as overrides.
+
+Prefer launching `Unity.exe` with `Start-Process -Wait -PassThru` and writing logs to `UnityProject/Logs/headless.log` instead of relying on `& $UnityExe ... -logFile -`. Unity is a GUI-subsystem executable on Windows, so direct PowerShell invocation can return unreliable `$LASTEXITCODE` behavior. On failure, tail the local log.
+
+Before invoking Unity, fail fast if `UnityProject/Temp/UnityLockfile` exists. Unity can appear to succeed while doing nothing when the project is already open in the editor. After invocation, verify the expected `Resources/*.unity3d` bundle exists before reporting success.
+
+### Generated Unity projects
+
+When scaffolding a Unity project outside the editor, include `ProjectSettings/ProjectVersion.txt`. Unity Hub uses this file to detect the intended editor version; without it, Hub shows a "Restricted Editor Version" warning and makes the user choose an installed editor manually. Match the version to the Unity editor used by the local workspace, for example:
+
+```text
+m_EditorVersion: 2022.3.62f3
+m_EditorVersionWithRevision: 2022.3.62f3
+```
+
+### ModForge Sketchfab imports
+
+ModForge's Sketchfab asset browser imports only downloadable Sketchfab models. Search is public, but archive import uses Sketchfab's authenticated `GET /v3/models/{uid}/download` endpoint; provide an OAuth access token in the UI. Imports create or reuse `<mod>/UnityProject`, unpack the glTF archive under `UnityProject/Assets/ModForge/Sketchfab/<asset-name>/`, add editor scripts for a headless Sketchfab AssetBundle build, and write `<mod>/build-sketchfab-assets.ps1`. Attribution is tracked at the mod root in `attribute.md` with a `sketchfab:<uid>` marker, model URL, author, and license.
+
+### Replacing imported source models
+
+Headless import scripts should mirror source folders, not only copy new files over old ones. When a modder replaces a model source folder, delete stale generated Unity assets (source copies, generated prefabs, and selected prefab aliases) before recreating them. Otherwise removed source models can remain in `Assets/` and continue to be bundled accidentally. Once a final model is chosen, prefer generating the stable XML-facing prefab directly instead of keeping extra candidate/alias prefabs in the bundle.
+
+### Texture import timing
+
+If setup scripts copy textures into `Assets/` and call `AssetDatabase.Refresh`, Unity imports those textures before later setup code can adjust their `TextureImporter`. Materials that bind a normal map during that first import can show "texture must be marked as a normal map" warnings even if the setup method fixes the importer afterward. Add an `AssetPostprocessor.OnPreprocessTexture` for generated asset folders so filenames containing `normal` are marked as `TextureImporterType.NormalMap` during the initial import pass.
+
 ### TagManager.asset
 
 The Unity project **must** use the 7DTD TagManager.asset, not Unity's default. Download it from the [7D2D/Templates-and-Utilities](https://github.com/7D2D/Templates-and-Utilities) repo (use the `A21TagManager.zip`) and replace `ProjectSettings/TagManager.asset`.

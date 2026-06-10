@@ -130,6 +130,59 @@ powershell -ExecutionPolicy Bypass -File build.ps1
 ```
 The game loads from its own `Mods/` directory — the project directory is not used at runtime.
 
+### ModForge Deploy Marker
+
+For ModForge-managed workspaces, a new or repaired mod scaffold is not considered ready until it has a root-level `deploy.ps1`. Codex sessions should not run deploy scripts or launch the game directly. To request deployment, create or touch the mod root marker:
+
+```powershell
+New-Item -ItemType File -Force -Path "<ModRoot>\.modforge-deploy" | Out-Null
+```
+
+ModForge watches for that marker and runs deployment outside the coding session.
+If `Test-Path` is false immediately after a successful marker touch, ModForge may have already consumed/deleted the marker to start queued deployment; do not use `Get-Item` as the marker existence check.
+
+`.modforge-state.json` stores ModForge's per-kind drift counters as numeric strings under `kinds.restart`, `kinds.xui`, and `kinds.assets`. If a merge leaves conflict markers inside those values, resolve each conflicted counter to the highest numeric side so the counter remains monotonic and the file stays valid JSON.
+
+### Build Script Path Resolution
+
+Root-level `build.ps1` wrappers should not assume the process working directory is the mod root. Resolve the root from `MODFORGE_MOD_DIR` when present, otherwise from `$MyInvocation.MyCommand.Path`/`$PSScriptRoot`, and normalize any `\\?\` extended-length path prefix before using `Push-Location` or passing paths to tools.
+
+Build wrappers should also map the common 7DTD install variables before invoking MSBuild:
+
+```powershell
+$gameDir = if ($env:GameDir) { $env:GameDir } elseif ($env:SEVEN_DTD_CLIENT) { $env:SEVEN_DTD_CLIENT } elseif ($env:SEVEN_DAYS_TO_DIE_PATH) { $env:SEVEN_DAYS_TO_DIE_PATH } else { "<default install>" }
+dotnet build $project -c Release "/p:GameDir=$gameDir"
+```
+
+Project files can support the same convention by accepting `GameDir`, `SevenDaysToDiePath`, `SEVEN_DTD_CLIENT`, and `SEVEN_DAYS_TO_DIE_PATH`, then validating that `$(GameDir)\7DaysToDie_Data\Managed\Assembly-CSharp.dll` and required mod DLLs such as `Mods\0_TFP_Harmony\0Harmony.dll` exist before `ResolveReferences`.
+
+### Mod Gitignore Unity Entries
+
+Always include these Unity workspace ignores in newly-created or repaired mod `.gitignore` files. The root-level hand-authored mod solution/project files and `src/` project are kept; only Unity-generated files under `UnityProject/` are ignored. If Unity has also created root-level `Library/`, `ProjectSettings/`, or `Temp/` folders in a mod whose real Unity project is under `UnityProject/`, treat those root folders as generated noise and ignore them too.
+
+```gitignore
+# Unity editor — all regenerated from Assets/ + ProjectSettings/
+UnityProject/Library/
+UnityProject/Logs/
+UnityProject/Temp/
+UnityProject/Obj/
+UnityProject/obj/
+UnityProject/UserSettings/
+UnityProject/MemoryCaptures/
+
+# Unity auto-generated IDE files (the hand-authored mod sln/csproj
+# at the repo root + src/ are kept; this only catches UnityProject/)
+UnityProject/*.csproj
+UnityProject/*.sln
+UnityProject/*.user
+
+# Unity build artifacts
+UnityProject/*.apk
+UnityProject/*.aab
+UnityProject/*.unitypackage
+UnityProject/headless_build.log
+```
+
 ---
 
 ## Dedicated Server Deployment
