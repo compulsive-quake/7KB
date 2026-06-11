@@ -24,6 +24,7 @@ Shared knowledgebase for 7DTD mod development. Used by multiple projects (7nes, 
 - [XUi - Controllers (C#)](XUi%20-%20Controllers%20(C%23).md) — C# XUiController subclasses, bindings, events
 - [HUD Safe Zones](HUD%20Safe%20Zones.md) — Top DAY/TIME strip + bottom message/toolbelt strip must not be overlapped by IMGUI or non-HUD-hiding windows
 - [IMGUI Tracker Stack](IMGUI%20Tracker%20Stack.md) — Right-side stacked status cards for tracked entities (HP bar + status text + fade in/out). Also covers interactive IMGUI tool overlays (alignment / tuning sliders): always include a typeable text field next to step buttons, expose `static IsOpen` so other input listeners can short-circuit (`Event.current.Use()` doesn't block `Input.GetMouseButtonDown`).
+- [zPhone External Apps](zPhone%20External%20Apps.md) — External app manifests, JSON page controls, action bridge registration, and held-item tuning patterns.
 
 ## Prefab & Binary Formats
 

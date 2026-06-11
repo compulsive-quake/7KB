@@ -203,6 +203,12 @@ Some sources and generated files may instead use a full `<items>` root. A safe e
 | Sellable to trader | `SellableToTrader` | Whether traders can buy this item. |
 | Creative mode | `CreativeMode` | Controls creative-menu visibility, commonly player-visible or developer/admin-only. |
 
+### Runtime HoldType Editing
+
+When changing an item's `HoldType` at runtime from C#, do not assume `ItemClass.HoldType` is a plain integer or enum. In 7DTD v2.6 it may be stored as a data wrapper with a writable `Value` property; working runtime editors should read/write that nested `Value` before trying to replace the field/property itself. The public `EHoldType` enum is incomplete for XML tuning: the game accepts the animation/offset table indices used by vanilla `items.xml` rather than only the few enum names.
+
+If HoldType reflection is driven from a held-item `LateUpdate()` tuner, wrap the write path defensively and throttle any warning logs. A failed `Convert.ChangeType` or wrapper write can otherwise throw once per frame while the item is held, flooding the console and making the item feel broken even though the XML loaded.
+
 ### Durability, Quality, And Repair
 
 | Field | XML | Meaning |
@@ -236,6 +242,10 @@ Items often contain nested action and effect data that should not be flattened t
 Common action fields include `Action0`/`Action1` class, `Auto_fire`, `Magazine_size`, `Magazine_items`, `Reload_time`, `Range`, `DamageEntity`, `DamageBlock`, `AttacksPerMinute`, `StaminaUsage`, `Projectile`, and `CrosshairOnAim`.
 
 Common effect nodes include `effect_group`, `passive_effect`, `triggered_effect`, and `requirement`. Preserve unknown attributes and child nodes because many item behaviors are implemented by specialized action classes or version-specific effect fields.
+
+### Custom Consumable Actions
+
+For custom C# item actions that consume the held item, vanilla consumables use `holdingEntity.inventory.DecHoldingItem(1)` after the action successfully completes. `Inventory.DecHoldingItem` only decrements the count when the item can stack; if the item is non-stackable it clears the held slot. Set `Stacknumber` above `1` for grenade-like consumables that should decrement one item from a stack.
 
 ### Placement Items
 
