@@ -63,6 +63,29 @@ This means the Unity scene root just moved. It does **not** mean the world moved
 
 The rule of thumb: read positions through `EntityAlive.position` (or a wrapper like [7debug](7debug%20-%20Remote%20Debug%20Server.md)'s `/api/players`) and treat origin reposition as a log artifact you can ignore.
 
+### Converting world coords → Unity scene space
+
+The shift is exposed as `Origin.position` (static). Whenever you hand a world coordinate to anything Unity-side — placing a GameObject, pointing a `Camera`, `Physics.Raycast`, `Camera.WorldToViewportPoint` / `WorldToScreenPoint` — subtract it first:
+
+```csharp
+Vector3 unityPos = entity.position - Origin.position;   // world → scene
+Vector3 worldPos = transform.position + Origin.position; // scene → world
+```
+
+Example — projecting an entity into a render-to-texture drone/camera feed for a screen-space marker box (FPV mod):
+
+```csharp
+Vector3 center = target.position - Origin.position + Vector3.up * (target.height * 0.5f);
+Vector3 vp = camera.WorldToViewportPoint(center);
+if (vp.z > 0f) // in front of camera
+{
+    float sx = vp.x * screenW;
+    float sy = (1f - vp.y) * screenH; // viewport y is bottom-up, GUI y is top-down
+}
+```
+
+`Entity.width` / `Entity.height` give the entity's collision extents — project the 8 corners of `position ± (width/2, height/2, width/2)` and take the screen-space min/max for a bounding box that scales with distance. `Voxel.Raycast(world, ray, dist, -538750997, 8, 0f)` (the same mask the game uses for projectile/world hits, in **world** coords) works as a cheap line-of-sight check; shorten `dist` by ~0.6 m so the ray doesn't clip the target's own collider. For display names: players via `EntityAlive.EntityName`, everything else via `Localization.Get(EntityClass.list[entity.entityClass].entityClassName)`.
+
 ---
 
 ## Sanity checks
