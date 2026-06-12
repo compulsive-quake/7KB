@@ -230,10 +230,26 @@ The game has several block base classes for different purposes:
 |---|---|---|
 | `Block` | Basic static block | None |
 | `BlockPowered` | Consumes power (wire target) | `TileEntityPowered` |
+| `BlockRanged` | Powered SMG/shotgun-style turret with ammo-slot UI | `TileEntityPoweredRangedTrap` |
 | `BlockPowerSource` | Generates power | `TileEntityPowerSource` |
 | `BlockWorkstation` | Crafting stations | `TileEntityWorkstation` |
 | `BlockForge` | Smelting stations | `TileEntityWorkstation` |
 | `BlockCampfire` | Cooking stations | `TileEntityWorkstation` |
+
+### Powered ranged trap ammo UI
+
+Use `BlockRanged`/`TileEntityPoweredRangedTrap` when a custom placed trap should behave like the vanilla SMG or shotgun auto turret and open the normal `powerrangedtrap` window with ammo slots. A plain `Block` with custom activation commands can show a radial menu, but it will not get the vanilla "E to interact" prompt or ammo-slot window.
+
+Minimum XML properties mirror vanilla `autoTurret`:
+
+```xml
+<property name="Class" value="BlockMyTurret, mymod"/>
+<property name="RequiredPower" value="15"/>
+<property name="AmmoItem" value="ammo9mmBulletBall+tags(ammo9mm)"/>
+<property name="ShowTargeting" value="true"/>
+```
+
+In C#, inherit from `BlockRanged`, call base activation methods, and bind runtime behavior to `TileEntityPoweredRangedTrap.ItemSlots`/`DecrementAmmo(...)` rather than storing a parallel ammo count. If migrating an existing save from a custom `TileEntity`, replace stale tile entities with `CreateTileEntity(chunk) as TileEntityPoweredRangedTrap` and carry over old ammo before opening the window.
 
 ### Custom class in mod DLL
 
