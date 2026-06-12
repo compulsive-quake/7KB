@@ -151,6 +151,16 @@ Response:
 ```
 **Note:** Only works from the main menu (`inGame: false`). Returns an error if already in a game.
 
+### POST /api/quit
+Saves and quits the game process gracefully (use before redeploying a DLL — the running game holds mod DLLs locked with "user-mapped section open" errors on copy).
+
+```bash
+curl -X POST -H "Content-Length: 0" http://localhost:7860/api/quit
+# -> {"status":"saving-and-quitting"}
+```
+
+**Quirk:** the server requires an explicit `Content-Length: 0` header. A bare `curl -X POST` (no body) returns `411 Length Required`, and a GET returns an error hint instead of quitting. The process takes a few seconds to save and exit — poll `Get-Process 7DaysToDie` (or equivalent) before copying files.
+
 Common useful commands:
 - `listplayers` — list connected players
 - `gettime` — current game time

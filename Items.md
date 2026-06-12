@@ -102,6 +102,18 @@ To adjust hand scale, modify the prefab's root `localScale` in Unity and rebuild
 
 > **Runtime note:** The game re-applies the held item's transform every frame during `Update`. Any code modifying the held item transform must do so in `LateUpdate` to apply after the game's positioning pass. Offsets should be applied *relative* to the game's values (add to position/rotation, multiply scale) rather than setting absolute values, since the game sets its own base values each frame.
 
+> **Strongly prefer authoring the prefab correctly over runtime transform adjustment.** The cleanest held item needs **zero** runtime transform code: bake the right pivot/scale into the prefab, put it on the `HoldingItem` layer (see below), and pick a `HoldType` in `items.xml`. Runtime "hand offset tuner" code that pokes the live held-item transform every frame is a recurring source of pain and was ultimately ripped out of RocketTurret:
+> - Poking the held **root** with a cache to recover the game's base can latch onto a **world** position (the game doesn't reliably re-seat the root every frame for every setup) — the model then freezes in space while the player walks away (the laser/aim keeps tracking off the head vector, masking the cause).
+> - Even offsetting the model's **children** instead is risky: if the engine reuses a shared held-item holder GameObject across items, your modifications can bleed into **other mods'** held items (their model shows up scaled/displaced/invisible). A user reported exactly this — "other apps' held items stopped showing when this mod is installed."
+>
+> If you genuinely need an offset, do it in the prefab, not at runtime. If you must do it at runtime, scope it so it only ever runs while *your* item is held and only touches *your* freshly-instantiated model, and treat any interaction with the shared held-item transform as suspect.
+
+> **"I'm holding it but the hand looks empty" gotcha:** First decide whether it's invisible in *both* views or *only first person* — they have different causes.
+>
+> **Invisible in first person but VISIBLE in third person → wrong layer (most common for custom asset-bundle meshes).** 7DTD has a dedicated **`HoldingItem`** layer (confirmed in the game's layer table, alongside `Shadow`, `RenderInTexture`, `NGUI`). Vanilla held items live on this layer permanently; **both** the main camera (third person) and the first-person weapon camera (which draws the held item on top so it never clips through walls) render it. A custom bundle mesh comes in on its baked-in `Default` layer, which only the main camera draws → shows in third person, invisible in first. **The game does NOT relayer custom-attached models** (the tell: in third person the custom item is still sitting on `Default`, not `HoldingItem` — if the game relayered it, it wouldn't be on `Default`). So set the layer yourself the way the game authors its own items: put the whole held hierarchy on `HoldingItem`, **once**, when the model is instantiated — `int l = LayerMask.NameToLayer("HoldingItem"); foreach (Transform t in held.GetComponentsInChildren<Transform>(true)) t.gameObject.layer = l;`. Resolve by name (don't hard-code the index). No per-frame work and no first/third-person detection are needed — that was a wrong turn; propagating the *root's* layer each frame does nothing because the root stays `Default`. Trigger the one-time set off "held transform changed" in the `LateUpdate` hand tuner (a model refresh re-instantiates the transform, so this re-applies automatically). Ideally bake the layer into the prefab at build time instead, but runtime-by-name avoids depending on the Unity project's layer indices matching the game's.
+>
+> **Invisible in BOTH views → placement/pivot.** (1) The FBX geometry is offset from its own pivot, and that offset is *multiplied* by any visible-size normalization scale baked into the prefab (a 0.5m model auto-scaled ~3.7x turns a small modeling offset into a meters-large displacement) — re-center the mesh so its renderer-bounds center sits on the wrapper origin during the build. (2) It needs per-item offset tuning; if the mod ships a runtime hand-offset/HoldType tuner, confirm its `Register()` is actually **called** from `InitMod` (a defined-but-never-invoked registration leaves it stuck at the invisible default with no way to adjust). Verify the laser/muzzle child via `invData.model` to prove the mesh instantiated even when nothing is visible.
+
 ---
 
 ## Item Icons (ItemIconAtlas)
@@ -116,6 +128,16 @@ UIAtlases/
 ```
 
 The game **auto-discovers** these by filename — no C# registration needed. This is different from radial menu icons (`UIAtlas/`), which require runtime injection via `MultiSourceAtlasManager.AddAtlas()`.
+
+### Gotcha: rendering icons from skinned-mesh prefabs
+
+When auto-generating an item/block icon by rendering a prefab to PNG in Unity (e.g. an `ExportPrefabIcons` editor script with an off-screen camera + bounds-fit framing), a **rigged/armatured FBX** — i.e. one imported as a `SkinnedMeshRenderer` (`animationType` not `None`) — produces a **blank or tiny-speck icon**. Tell-tale sign: Unity's own Project-window thumbnail for that prefab is **blank grey** too, while a static-mesh prefab in the same project previews fine.
+
+Cause: both Unity's `AssetPreview` thumbnail generator and a custom bounds-fit exporter frame the camera using the renderer's bounds. A `SkinnedMeshRenderer`'s root-bone AABB is **unreliable in edit mode** — for rigged FBXs it often reports wildly oversized bounds (one turret reported ~240 m vs. a real ~1.8 m model), so the camera frames mostly empty space and the model collapses to a dot. (`BakeMesh` is not a reliable workaround: depending on where scale lives in the hierarchy it can report ~0.02 m instead.)
+
+Fix (one change fixes both Unity's thumbnail and the exporter): set **`m_UpdateWhenOffscreen: 1`** on the `SkinnedMeshRenderer` (inspector: "Update When Offscreen"). This forces Unity to recompute bounds from the actual posed vertices every render — respecting the full bone/scale hierarchy — so framing is correct. When the renderer comes from a nested model-prefab/FBX instance, apply it as a prefab override targeting the renderer's `fileID` (the same `fileID` whose `m_Materials` the prefab already overrides), `propertyPath: m_UpdateWhenOffscreen`, `value: 1`. No guessed bounds numbers needed (guessing wrong also breaks in-game frustum culling). Negligible per-frame cost for a single block/item.
+
+Separately, a skinned mesh may still render **magenta** in the off-screen/export camera even after framing is fixed (it renders correctly in the Scene view) — that's a distinct render-path issue, not the bounds problem. Suspect batch/headless rendering of skinned meshes if the export runs via Unity `-batchmode`; rendering from the open editor (GPU present) is more reliable.
 
 ---
 

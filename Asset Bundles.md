@@ -367,3 +367,9 @@ A `ModelScale` slider on the entity's tunable API (default 1.0, range 0.02–4.0
 > importer.materialSearch     = ModelImporterMaterialSearch.Local;
 > ```
 > `InPrefab` keeps the materials as sub-assets of the FBX, so they travel with the prefab into the bundle as dependencies. No separate material extraction needed.
+
+---
+
+## Emission map gotcha — whole model glows a flat color in-game
+
+If a placed/held custom model glows a uniform bright color (e.g. neon green legs) that you can't reproduce in the Unity editor, suspect the Standard-shader emission slot. A model-setup script that does `mat.SetTexture("_EmissionMap", tex); mat.EnableKeyword("_EMISSION"); mat.SetColor("_EmissionColor", Color.white)` will light the model by that map at full intensity in-game — **even if the committed `.mat` YAML doesn't list `_EMISSION` in `m_ValidKeywords`**, because the bundle is rebuilt from the script, not the YAML. Placeholder emissive textures are frequently a solid color block (an artist's mask UV fill), so the whole model takes that color. Fix: stop applying the emission map and explicitly neutralize it — `DisableKeyword("_EMISSION")`, `SetColor("_EmissionColor", Color.black)`, `globalIlluminationFlags = EmissiveIsBlack`. Re-enable only with a proper mostly-black emissive map that lights just the intended detail. Note the in-editor preview can look fine while the in-game shader still applies emission, so verify in-game.

@@ -67,3 +67,4 @@ Shared knowledgebase for 7DTD mod development. Used by multiple projects (7nes, 
 ## Tooling Notes
 
 - [ModForge UI Conventions](ModForge%20UI%20Conventions.md) — Compact modal sizing and typography conventions for the ModForge desktop app.
+- [ModForge Managed Agent Docs](ModForge%20Managed%20Agent%20Docs.md) — How modman maintains the sentinel blocks in each mod's CLAUDE.md/AGENTS.md; refreshed only when a mod is opened, never via bulk sweep.
