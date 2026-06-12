@@ -129,6 +129,16 @@ UIAtlases/
 
 The game **auto-discovers** these by filename — no C# registration needed. This is different from radial menu icons (`UIAtlas/`), which require runtime injection via `MultiSourceAtlasManager.AddAtlas()`.
 
+### Gotcha: rendering icons from skinned-mesh prefabs
+
+When auto-generating an item/block icon by rendering a prefab to PNG in Unity (e.g. an `ExportPrefabIcons` editor script with an off-screen camera + bounds-fit framing), a **rigged/armatured FBX** — i.e. one imported as a `SkinnedMeshRenderer` (`animationType` not `None`) — produces a **blank or tiny-speck icon**. Tell-tale sign: Unity's own Project-window thumbnail for that prefab is **blank grey** too, while a static-mesh prefab in the same project previews fine.
+
+Cause: both Unity's `AssetPreview` thumbnail generator and a custom bounds-fit exporter frame the camera using the renderer's bounds. A `SkinnedMeshRenderer`'s root-bone AABB is **unreliable in edit mode** — for rigged FBXs it often reports wildly oversized bounds (one turret reported ~240 m vs. a real ~1.8 m model), so the camera frames mostly empty space and the model collapses to a dot. (`BakeMesh` is not a reliable workaround: depending on where scale lives in the hierarchy it can report ~0.02 m instead.)
+
+Fix (one change fixes both Unity's thumbnail and the exporter): set **`m_UpdateWhenOffscreen: 1`** on the `SkinnedMeshRenderer` (inspector: "Update When Offscreen"). This forces Unity to recompute bounds from the actual posed vertices every render — respecting the full bone/scale hierarchy — so framing is correct. When the renderer comes from a nested model-prefab/FBX instance, apply it as a prefab override targeting the renderer's `fileID` (the same `fileID` whose `m_Materials` the prefab already overrides), `propertyPath: m_UpdateWhenOffscreen`, `value: 1`. No guessed bounds numbers needed (guessing wrong also breaks in-game frustum culling). Negligible per-frame cost for a single block/item.
+
+Separately, a skinned mesh may still render **magenta** in the off-screen/export camera even after framing is fixed (it renders correctly in the Scene view) — that's a distinct render-path issue, not the bounds problem. Suspect batch/headless rendering of skinned meshes if the export runs via Unity `-batchmode`; rendering from the open editor (GPU present) is more reliable.
+
 ---
 
 ## Localization
