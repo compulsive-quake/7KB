@@ -16,4 +16,10 @@ How the per-mod Claude model picker works and what to update when Anthropic ship
 
 Verify a new alias with `claude --model <alias> --print "Reply with just: ok"` before shipping it.
 
-Last updated 2026-06-10: added `fable` (Fable 5 tier) and bumped Opus description 4.7 → 4.8.
+## Gotcha: stale installed builds black-screen on unknown aliases
+
+The dev build and the installed build share the same SQLite DB (`%APPDATA%\modforge\modforge.sqlite`). If a dev build persists a new alias (e.g. `fable`) and the installed release predates the matching `MODEL_META` entry, the installed app throws `Cannot read properties of undefined (reading 'label')` in ChatInput when the mod's tab is restored at startup — React unmounts the whole tree and the app shows a **solid black screen** (the `bg-zinc-950` body). Seen 2026-06-11 with v1.0.20 installed + `fable` saved on a mod.
+
+Fixes: ship a release containing the new alias before using it in dev, and/or keep `MODEL_META[model]` lookups fallback-safe (`?? MODEL_META.default`). To diagnose this class of crash in an installed build, see [[Debugging Installed ModForge Builds]] (Debugging Installed ModForge Builds.md).
+
+Last updated 2026-06-11: added `fable` (Fable 5 tier), bumped Opus description 4.7 → 4.8, documented the stale-build black-screen gotcha.
