@@ -274,6 +274,10 @@ For `Shape="ModelEntity"` blocks:
 
 > **Without the 7DTD TagManager**, the `T_Block` tag won't exist in your Unity project and the prefab will export with `Untagged`, making the block non-interactive in-game (even though it works in the prefab editor, which has its own simplified interaction).
 
+#### UnityYAML parse failure: empty layer entries need a trailing space
+
+If Unity refuses to open the project with `Unable to parse file ProjectSettings/TagManager.asset: [Parser Failure at line N: Expect ':' between key and value within mapping]`, check the empty slots in the `layers:` list. Unity's own serializer writes empty entries as `  - ` (dash **plus trailing space**); a hand-edited or script-generated file with a bare `  -` is valid YAML (PyYAML parses it fine) but UnityYAML chokes on it and reports the error at an unrelated later line (typically inside `m_SortingLayers`). Fix: `sed -i 's/^  -$/  - /' ProjectSettings/TagManager.asset`. Beware editors/pre-commit hooks that strip trailing whitespace — they reintroduce the problem.
+
 ---
 
 ## Sizing imported models correctly (1 unit = 1 metre)
