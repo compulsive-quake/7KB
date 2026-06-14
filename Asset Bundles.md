@@ -278,6 +278,41 @@ For `Shape="ModelEntity"` blocks:
 
 If Unity refuses to open the project with `Unable to parse file ProjectSettings/TagManager.asset: [Parser Failure at line N: Expect ':' between key and value within mapping]`, check the empty slots in the `layers:` list. Unity's own serializer writes empty entries as `  - ` (dash **plus trailing space**); a hand-edited or script-generated file with a bare `  -` is valid YAML (PyYAML parses it fine) but UnityYAML chokes on it and reports the error at an unrelated later line (typically inside `m_SortingLayers`). Fix: `sed -i 's/^  -$/  - /' ProjectSettings/TagManager.asset`. Beware editors/pre-commit hooks that strip trailing whitespace — they reintroduce the problem.
 
+#### Tag ORDER matters, not just tag presence (index serialization)
+
+Asset bundles serialize a GameObject's tag as an **index** into the authoring project's tag list (custom tags start at 20000), and the game resolves that index against **its own** TagManager at load. Merely adding `T_Block` to your project is NOT enough — if it isn't at the same position as in the game's list, the prefab silently resolves to a *different* tag in-game. Real case (RocketTurret, 2026-06): a project whose only custom tag was `T_Block` shipped a root tagged index 20000, which the game resolved as `Item` → block rendered fine but had no E-prompt and took no melee/bullet damage.
+
+The game's custom tag order (V 2.6 b14), indices 20000+: `Item, T_Mesh, B_Mesh, T_Mesh_B, T_Block, SB_Prefabs, ...` — so `T_Block` is **20004**. Mirror the game's full tag AND layer lists in `ProjectSettings/TagManager.asset` (the Templates-and-Utilities repo's TagManager does this; a hand-rolled one must match order exactly).
+
+To dump the game's authoritative lists (UnityPy):
+
+```python
+import UnityPy
+env = UnityPy.load(r'D:\...\7DaysToDie_Data\data.unity3d')
+for obj in env.objects:
+    if obj.type.name == 'TagManager':
+        d = obj.read_typetree()
+        print(d['tags'])    # custom tags, index 20000+
+        print(d['layers'])  # layers 0-31
+```
+
+The same technique on the mod's `.unity3d` (read `GameObject` objects, print `m_Tag`) shows what index actually shipped.
+
+**Why the tag drives everything:** decompiled `Voxel.raycastNew` checks `hit.collider.transform.tag == "T_Block"`, then `GameUtils.FindMasterBlockForEntityModelBlock` → `RootTransformRefParent.FindRoot(hitTransform)` → `chunk.GetBlockEntity(transform)` (exact reference match against `BlockEntityData.transform`). Any other tag means the hit never maps to a block: no activation prompt, no block damage. Layers don't matter for this — the chunk re-layers model colliders itself via `Utils.SetColliderLayerRecursively` at spawn.
+
+**Runtime safety net:** a custom block class can force the tag on every model spawn, which fixes already-built bundles without a Unity rebuild:
+
+```csharp
+public override void OnBlockEntityTransformAfterActivated(WorldBase _world,
+    Vector3i _blockPos, int _cIdx, BlockValue _blockValue, BlockEntityData _ebcd)
+{
+    base.OnBlockEntityTransformAfterActivated(_world, _blockPos, _cIdx, _blockValue, _ebcd);
+    if (_ebcd != null && _ebcd.bHasTransform && _ebcd.transform != null
+        && !_ebcd.transform.CompareTag("T_Block"))
+        _ebcd.transform.tag = "T_Block";
+}
+```
+
 ---
 
 ## Sizing imported models correctly (1 unit = 1 metre)
@@ -351,7 +386,7 @@ A `ModelScale` slider on the entity's tunable API (default 1.0, range 0.02–4.0
 
 ## Gotchas
 
-> **Missing T_Block tag** — If your ModelEntity block renders but can't be interacted with in-game, the prefab's root GameObject is likely missing the `T_Block` tag. Ensure the 7DTD TagManager.asset is installed and the root is tagged.
+> **Missing T_Block tag** — If your ModelEntity block renders but can't be interacted with in-game, the prefab's root GameObject is likely missing the `T_Block` tag. Ensure the 7DTD TagManager.asset is installed and the root is tagged. Note that the tag is serialized **by index**, so the project's custom-tag *order* must match the game's (`T_Block` = 20004) — see "Tag ORDER matters" above.
 
 > **Bundle already loaded** — If the game loaded the bundle via a block `Model` property, `AssetBundle.LoadFromFile` will fail. Use `GetAllLoadedAssetBundles()` first.
 
