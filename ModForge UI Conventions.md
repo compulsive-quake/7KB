@@ -18,6 +18,7 @@ Shared conventions for the ModForge desktop app UI.
 
 ## Codex launch compatibility
 
+- Agent binary settings should keep the editable text field visible and place discovery actions beside it. Claude Code uses `settings_discover_claude_binary` to search PATH/Get-Command for `claude`; Codex uses `settings_discover_codex_binary` plus its Windows app-package fallbacks.
 - Codex config `service_tier = "priority"` is obsolete for current Codex builds; startup fails with `unknown variant 'priority', expected 'fast' or 'flex'`. Use `service_tier = "fast"` as the direct replacement, and have ModForge sanitize that line when it edits `~/.codex/config.toml` for project trust.
 - ModForge's Codex model picker maps UI labels to Codex config overrides: `GPT-5.5` -> `model = "gpt-5.5"`, `Extra High` reasoning -> `model_reasoning_effort = "xhigh"`, and speed choices -> `service_tier = "fast"` or `"flex"`. Apply these as `codex exec -c ...` overrides instead of relying on the user's global config file.
 

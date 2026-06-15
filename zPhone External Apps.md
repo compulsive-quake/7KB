@@ -28,3 +28,7 @@ External page JSON supports controls such as `button`, `number`, `toggle`, `sele
 - Button controls that send `{ method }` through a `*.action` action.
 
 For held-item tuning apps, persist the chosen values under the mod's `Config/` folder, load them from `IModApi.InitMod`, and apply live transforms in a `MonoBehaviour.LateUpdate()` after the game has positioned the held model. HoldType can be updated at runtime by reflecting the target `ItemClass`, setting a `HoldType` field/property when present, and updating its `DynamicProperties.Values["HoldType"]` string as a fallback. Refresh the currently held item with `inventory.SetRightHandAsModel()` and `player.ShowHoldingItem(true)` after HoldType changes.
+
+## Gotcha: leftover deployed manifests
+
+zPhone scans deployed mod folders for `zphone/app.json` — not the source repo. If a mod deletes `zphone/app.json` from source but the deploy script never cleans the destination, the deployed copy survives and zPhone keeps registering the app. When the player opens that orphaned page the bridge logs `no handler for action '<id>.requestState'` (the C# `Register()` is gone). Fixes: either drop the leftover deployed folder, or have the deploy script copy `zphone/` with a pre-clean (remove-then-copy) so source deletions propagate. Symptom in logs: `[zPhone] Bridge: no handler for action 'X.requestState'`.

@@ -31,6 +31,61 @@ Blocks using custom models must set:
 
 ---
 
+## Loading Vanilla 7DTD Assets from C#
+
+Vanilla prefabs, materials, particles, etc. live inside the game's main asset
+bundle (`data.unity3d`). The game exposes a single resolver — `DataLoader` —
+that understands the `@:` prefix as "look in the vanilla bundle":
+
+```csharp
+GameObject rocket = DataLoader.LoadAsset<GameObject>(
+    "@:Other/Items/Weapons/Ranged/RocketLauncher/rocketPrefab.prefab");
+
+Transform entityPrefab = DataLoader.LoadAsset<Transform>(
+    "@:Entities/Player/Common/AnimControllers/...");
+```
+
+This is how you reuse vanilla visuals/sounds without shipping copies. Concrete
+recipe used by RocketTurret (rocket projectile visual): instantiate
+`rocketPrefab`, then strip the components that would drive its own behavior
+(Rigidbody, colliders, Projectile/Rocket MonoBehaviours) so you keep the mesh,
+trail ParticleSystems, and AudioSource while flying it manually. Cache the
+loaded prefab in a static — `LoadAsset` is not free per call.
+
+> **Vanilla projectile prefabs ship with effect children INACTIVE.**
+> `rocketPrefab` has Smoke/flame/glow children with `activeSelf=false`; the
+> vanilla `Launcher` action calls `OnActivateItemGameObjectReference.ActivateItem(true)`
+> at fire time to wake them. If you instantiate the prefab yourself, you'll get
+> just the bare mesh — no smoke trail, no flame. Fix: recursively walk children
+> after `Instantiate` and `SetActive(true)` on each, then `Play()` any
+> `ParticleSystem` that isn't already playing (instantiating a deactivated
+> hierarchy can skip the initial PlayOnAwake pulse). See `RocketTurret`'s
+> `ActivateTrailEffects` in `RocketTurretLaunchManager.cs`.
+
+For the firing/weapon sound, use the sound *name* from `sounds.xml` instead of
+loading the clip directly:
+
+```csharp
+using Audio;
+
+// Networked: plays locally AND broadcasts to other clients in earshot.
+GameManager.Instance.PlaySoundAtPositionServer(
+    worldPos, "m136_fire", AudioRolloffMode.Logarithmic, 80);
+
+// Local-only fallback if no GameManager (e.g. very early in load):
+Manager.Play(worldPos, "m136_fire");
+```
+
+`Manager` lives in the `Audio` namespace. Common useful vanilla sound IDs:
+`m136_fire` (rocket launcher), `m136_reload_*`, weapon-class fires, etc. —
+grep `Data/Config/sounds.xml` for `SoundDataNode name=`.
+
+The C# project needs references to `UnityEngine.ParticleSystemModule.dll` and
+`Unity.Addressables.dll` (both ship in `7DaysToDie_Data/Managed/`) to use
+`ParticleSystem` APIs and `DataLoader.LoadAsset` respectively.
+
+---
+
 ## Loading Bundles from C#
 
 ### From mod Resources folder
