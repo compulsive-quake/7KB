@@ -21,6 +21,8 @@ If `icon` is omitted, zPhone falls back to its settings icon. Keep the `zphone/`
 
 The manifest `type` should be a public class in the named mod assembly with a public static `Register()` method. In that method, register actions by reflecting the loaded `zPhone` assembly and calling `ZphoneBridge.RegisterAction(string, Action<JObject>)`. This avoids a compile-time zPhone reference. The same bridge exposes `SendToJs(string, object)` for status/state updates.
 
+**Symptom: app stuck on black "Loading" screen.** The page's `stateAction` (e.g. `rocketTurret.requestState`) fires on open and the page waits for the matching `stateEvent` (e.g. `rocketTurret.state`) before rendering. If the mod ships `zphone/app.json` + `page.json` but no actions class (or the class lacks a public static `Register()`), `ZPhoneAppRegistry.RegisterExternalActions()` logs `App '<id>' did not expose <Type>.Register()`, no handler answers the state request, and the page hangs on "Loading" forever. Fix: add the `<Type>` class with `Register()` wiring `*.requestState`/`*.setFloat`/`*.action` and a `SendState()` that emits the `stateEvent` with `installed = true` plus every `stateField` the page references. RocketTurret's class mirrors FPV's (minus prop-spin) — copy that pattern. The class lives in the mod DLL, so this is a restart-kind change (deploy + game restart, not xui_reload).
+
 External page JSON supports controls such as `button`, `number`, `toggle`, `select`, `heading`, `text`, `stat`, and `info`. A common tuning layout uses:
 
 - `stateAction` / `stateEvent` for initial state and refreshes.
@@ -28,6 +30,14 @@ External page JSON supports controls such as `button`, `number`, `toggle`, `sele
 - Button controls that send `{ method }` through a `*.action` action.
 
 For held-item tuning apps, persist the chosen values under the mod's `Config/` folder, load them from `IModApi.InitMod`, and apply live transforms in a `MonoBehaviour.LateUpdate()` after the game has positioned the held model. HoldType can be updated at runtime by reflecting the target `ItemClass`, setting a `HoldType` field/property when present, and updating its `DynamicProperties.Values["HoldType"]` string as a fallback. Refresh the currently held item with `inventory.SetRightHandAsModel()` and `player.ShowHoldingItem(true)` after HoldType changes.
+
+Tuning apps are scaffolding: once values are finalized, promote them to hardcoded defaults / `items.xml` and delete the app (`zphone/` folder, the actions class, the settings JSON load/save). **RocketTurret did this in June 2026** for hand placement — that tuning now lives hardcoded in `RocketTurretPointerHandAdjuster` (see Items.md "Held Item Scale & Positioning" for the end-state pattern). Later in June 2026 RocketTurret re-created the app for a different tunable (laser beam origin offset + width — `RocketTurretZPhoneActions` + `RocketTurretLaserTuning`, saving `Config/rocket_turret_laser.json`), so it is again a live example until those values are finalized. **FPV finalized its hand-placement tuning the same way in June 2026** (hardcoded in `FPVHandAdjuster`, `HoldType` baked into `items.xml`, whole `FPVControlAPI` + Newtonsoft.Json reference deleted with the app).
+
+When deleting an app, also clean the **deployed** mod folder: a `Copy-Item`-based deploy script (unlike `robocopy /MIR`) never removes files, so the stale `zphone/` folder keeps the app visible in zPhone (now broken, since its actions class is gone) and the orphaned settings JSON lingers under `Config/`.
+
+The `toggle` control is a button-style control: `{ "type": "toggle", "label", "action", "method", "stateField" }`. It sends `{ method }` through the action (same shape as `button`) and renders on/off from the boolean `stateField` in the state event — so the C# side implements it as a parameterless method that flips the bool, and `SendState()` reports it.
+
+Note the deploy gotcha for saved tuning files: a `robocopy /MIR` deploy (ModForge default) deletes runtime-saved JSON under the deployed mod's `Config/` on every redeploy, because the file doesn't exist in the source repo. Read the saved values out of the deployed folder (or copy the JSON into the repo's `Config/`) before the next deploy.
 
 ## Gotcha: leftover deployed manifests
 

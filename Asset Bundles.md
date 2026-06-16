@@ -329,6 +329,10 @@ For `Shape="ModelEntity"` blocks:
 
 > **Without the 7DTD TagManager**, the `T_Block` tag won't exist in your Unity project and the prefab will export with `Untagged`, making the block non-interactive in-game (even though it works in the prefab editor, which has its own simplified interaction).
 
+#### UnityYAML parse failure: empty layer entries need a trailing space
+
+If Unity refuses to open the project with `Unable to parse file ProjectSettings/TagManager.asset: [Parser Failure at line N: Expect ':' between key and value within mapping]`, check the empty slots in the `layers:` list. Unity's own serializer writes empty entries as `  - ` (dash **plus trailing space**); a hand-edited or script-generated file with a bare `  -` is valid YAML (PyYAML parses it fine) but UnityYAML chokes on it and reports the error at an unrelated later line (typically inside `m_SortingLayers`). Fix: `sed -i 's/^  -$/  - /' ProjectSettings/TagManager.asset`. Beware editors/pre-commit hooks that strip trailing whitespace — they reintroduce the problem.
+
 #### Tag ORDER matters, not just tag presence (index serialization)
 
 Asset bundles serialize a GameObject's tag as an **index** into the authoring project's tag list (custom tags start at 20000), and the game resolves that index against **its own** TagManager at load. Merely adding `T_Block` to your project is NOT enough — if it isn't at the same position as in the game's list, the prefab silently resolves to a *different* tag in-game. Real case (RocketTurret, 2026-06): a project whose only custom tag was `T_Block` shipped a root tagged index 20000, which the game resolved as `Item` → block rendered fine but had no E-prompt and took no melee/bullet damage.
