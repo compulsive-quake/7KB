@@ -30,6 +30,7 @@ Shared conventions for the ModForge desktop app UI.
 - Agent sessions must get the KB checkout from ModForge settings, never by guessing `../7KB`. Add configured `kb_repo_path` to Codex workspace-write roots, include it in Codex per-turn prompts, and stamp it into managed per-mod `CLAUDE.md`/`AGENTS.md` blocks.
 - Do not update a mod's `CLAUDE.md` or `AGENTS.md` unless that mod is currently opened in ModForge. This prevents background or unrelated mod folders from receiving managed-agent-file edits.
 - The Knowledge Base opens as a full-window top-right toolbar section (`section="kb"`), like Settings/Game/Mod Manager. Do not expose it as a left activity-rail side panel.
+- Dirty Knowledge Base git status is surfaced globally: poll `kb_status`, show an amber count badge on the top-right KB toolbar icon, and show the changed-file list plus a `Commit & Push` button in the KB reader. The commit action stages all KB changes and uses the generic message `more knowledge` before pushing.
 - The right dock cluster (Run panel, Action Log panel, and right activity rail) is only visible in the main Mods workspace. Hide it in top-right full-window sections such as Knowledge Base, Settings, Game, and Mod Manager.
 
 ## Installed mod manager
