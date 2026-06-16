@@ -33,6 +33,15 @@ Shared conventions for the ModForge desktop app UI.
 - Dirty Knowledge Base git status is surfaced globally: poll `kb_status`, show an amber count badge on the top-right KB toolbar icon, and show the changed-file list plus a `Commit & Push` button in the KB reader. The commit action stages all KB changes and uses the generic message `more knowledge` before pushing.
 - The right dock cluster (Run panel, Action Log panel, and right activity rail) is only visible in the main Mods workspace. Hide it in top-right full-window sections such as Knowledge Base, Settings, Game, and Mod Manager.
 
+## Git commit author identity
+
+- ModForge stores a default git identity in Settings (`git_user_name` / `git_user_email`, Git tab). When both are set, `git_commit` applies them inline via `git -c user.name=… -c user.email=… commit` (see `commit_changes` in `git_status.rs`) so commits work on any mod even when the repo/global git config has no identity. This is non-mutating — it does not write to any repo's config.
+- If a commit fails with an "author identity unknown" style error (detected by `isGitIdentityError` in `LeafPaneView.tsx`) and no default is set, the commit dialog shows `GitIdentityDialog`. It offers name/email plus an "This mod" vs "All mods" toggle: "All mods" saves the ModForge default (so it never asks again), "This mod" calls the `git_set_local_identity` command which writes `user.name`/`user.email` to that repo's local git config only. On success it retries the pending commit with the same message.
+
+## Adding a global setting (end-to-end)
+
+A new global setting touches, in order: `Settings` struct in `src-tauri/src/settings.rs` → read it in BOTH `settings_get_raw` and `settings_get` → write it in `settings_save` (stored as a string KV row in the `settings` table) → `Settings` interface in `src/types.ts` (camelCase) → a control in the relevant `SettingsPanel.tsx` tab using `draft.<field>` / `update("<field>", …)`. The Zustand store passes the whole `Settings` object through `saveSettings`, so no store change is needed for a plain field.
+
 ## Installed mod manager
 
 - The Mod Manager section should list installed client mods from `<7DTD client>/Mods`, not just registered ModForge source mods. Match installed folders back to registered mods by `ModInfo.xml` `<Name value="...">` first, then by source/folder name.

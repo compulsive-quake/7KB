@@ -4,6 +4,52 @@ Part of the [7DTD Modding Knowledgebase](README.md). Covers custom item definiti
 
 ---
 
+## Explosion particle indices (`Explosion.ParticleIndex`)
+
+`WorldStaticData.prefabExplosions` is a `Transform[100]` loaded at startup from
+addressables `Prefabs/prefabExplosion{i}.prefab` (i = 0..99). An item's
+`Explosion.ParticleIndex` picks which one its blast shows. Indices seen in stock
+`items.xml`:
+
+| Index | Used by |
+|---|---|
+| 13 | `thrownGrenade`, `thrownGrenadeContact` — clean grenade burst, **no vehicle debris** |
+| 21 | `thrownTimedCharge` |
+| 36 | rocket/big munitions |
+| 7 | zombie vomit/boulder projectiles |
+| 4 | vehicle explosion — throws **car-part debris** (avoid for generic blasts) |
+
+**Best way — spawn the real grenade FX via `GameManager.ExplosionClient`.**
+The cleanest "pure visual, no block damage" explosion is the game's own
+client-side FX call — literally the path a thrown grenade runs for its visuals:
+```csharp
+// _clrIdx is never read inside ExplosionClient, so 0 is fine.
+// It subtracts Origin.position itself — pass the FULL world pos.
+// Empty change list => no block edits; 0 blastPower/radius => no knockback.
+static readonly List<BlockChangeInfo> NoChanges = new List<BlockChangeInfo>();
+GameManager.Instance.ExplosionClient(0, worldPos, Quaternion.identity,
+    index, 0, 0f, 0f, entityId, NoChanges);
+```
+`ExplosionClient` only edits blocks when handed a **non-empty** change list, so
+an always-empty list guarantees zero terrain damage. It plays the full burst
+(fireball, light flash, lingering smoke, ground scorch) and lets the prefab's
+own `TemporaryObject` end it at the natural duration — no manual `Destroy`
+timer, so the effect is never cut short. (Airstrike routes both its impact and
+cosmetic FX through this — fixed June 2026.)
+
+**Why not raw `Instantiate`** (the older Airstrike approach): two gotchas.
+1. **Magenta quad on the ground.** Some indices are broken/missing-material
+   prefabs (Airstrike's cosmetic puffs used **index 1**, which drew a magenta
+   "missing material" quad below the blast). Stick to known-good indices — **13
+   is the safe thrown-grenade burst**. (Vehicle indices 4/29 also bake in a
+   debris/carcass mesh you usually don't want.)
+2. **Don't truncate the lifetime.** A short `Destroy(go, 1.1f)` cuts the burst
+   off so it "disappears quickly" vs a real grenade. Let the prefab's
+   `TemporaryObject` self-time it; if you must cap, keep it well past the
+   natural duration (~3–4s).
+
+---
+
 ## Defining Items
 
 Items are defined via XPath patches in `Config/items.xml`:
@@ -116,6 +162,8 @@ To adjust hand scale, modify the prefab's root `localScale` in Unity and rebuild
 > **Invisible in first person but VISIBLE in third person → wrong layer (most common for custom asset-bundle meshes).** 7DTD has a dedicated **`HoldingItem`** layer (confirmed in the game's layer table, alongside `Shadow`, `RenderInTexture`, `NGUI`). Vanilla held items live on this layer permanently; **both** the main camera (third person) and the first-person weapon camera (which draws the held item on top so it never clips through walls) render it. A custom bundle mesh comes in on its baked-in `Default` layer, which only the main camera draws → shows in third person, invisible in first. **The game does NOT relayer custom-attached models** (the tell: in third person the custom item is still sitting on `Default`, not `HoldingItem` — if the game relayered it, it wouldn't be on `Default`). So set the layer yourself the way the game authors its own items: put the whole held hierarchy on `HoldingItem`, **once**, when the model is instantiated — `int l = LayerMask.NameToLayer("HoldingItem"); foreach (Transform t in held.GetComponentsInChildren<Transform>(true)) t.gameObject.layer = l;`. Resolve by name (don't hard-code the index). No per-frame work and no first/third-person detection are needed — that was a wrong turn; propagating the *root's* layer each frame does nothing because the root stays `Default`. Trigger the one-time set off "held transform changed" in the `LateUpdate` hand tuner (a model refresh re-instantiates the transform, so this re-applies automatically). Ideally bake the layer into the prefab at build time instead, but runtime-by-name avoids depending on the Unity project's layer indices matching the game's.
 >
 > **World-space effects (laser beams, muzzle flashes) anchored to a held-item child transform appear visually detached from the rendered model in first person — even when the transform data is verified correct end-to-end.** Cause: held items on the `HoldingItem` layer are drawn by UFPS's weapon camera (7DTD ships UFPS — `vp_FPCamera` / `vp_FPWeapon` with its own rendering FOV, see `originalRenderingFieldOfView` in Assembly-CSharp), while a world-space `LineRenderer` on `Default` is drawn by the world camera (`EntityPlayerLocal.playerCamera`). Different projections → the muzzle's true world position lands on a different screen pixel than the rendered aperture, so the beam start floats off the device (typically toward screen center). Debugging tell: prefab marker position, bundle freshness, and `FindDeepChild` lookup all check out, yet the beam is offset. Fix (RocketTurret, June 2026): screen-space re-anchor — project the muzzle through the weapon camera (`WorldToViewportPoint`), unproject through the world camera (`ViewportToWorldPoint`) at the same view depth clamped past the world camera's near plane; find the weapon camera at runtime as the enabled camera ≠ world camera whose `cullingMask` includes `HoldingItem` (highest depth wins), and fall back to the raw muzzle position when none is active (third person). Don't instead put the LineRenderer on `HoldingItem` — the far end must hit a world target and would be drawn on top of geometry with the wrong projection.
+>
+> **Better resolution (RocketTurret, June 2026 — what actually shipped): don't anchor the beam to a model pixel at all.** The screen-space reprojection above technically works but is fragile and was abandoned. The robust pattern (ported from the Airstrike designator, which uses the same vanilla flashlight model) is: base the beam start on the held model's **transform position** (`inventory.GetHoldingItemTransform().position`, falling back to `cameraTransform.position`) plus a small offset built from the **camera basis** (`cam.right*R + cam.up*U + cam.forward*F`), with R/U/F tuned live by numpad. Cast the *painting* ray from the **camera center** (`cameraTransform.position/forward`), not the model, so the endpoint sits under the crosshair at every pitch. You're no longer trying to pin the start to a specific rendered pixel of the model, so the two-camera FOV mismatch stops mattering — the small camera-space offset reads as "emerging from the device" without pixel-exact registration. Draw it per-frame in a `LateUpdate` `MonoBehaviour` on the laser GameObject (after the camera moves) rather than in `ItemAction.OnHoldingUpdate` (throttled tick → laggy/smeared beam). Both model and camera transforms are render-space, so add `Origin.position` to express the start in un-shifted world coords (and subtract it again in `LineRenderer.SetPosition`). This also dropped the whole custom-mesh + `HoldingItem`-relayer + hand-placement-tuner stack: switching the item's `Meshfile` to a vanilla prefab (`@:Other/Items/Tools/flashlight02Prefab.prefab`) means the game handles layer/placement and none of the above first-person-invisibility gotchas apply.
 
 > **Invisible in BOTH views → placement/pivot.** (1) The FBX geometry is offset from its own pivot, and that offset is *multiplied* by any visible-size normalization scale baked into the prefab (a 0.5m model auto-scaled ~3.7x turns a small modeling offset into a meters-large displacement) — re-center the mesh so its renderer-bounds center sits on the wrapper origin during the build. (2) It needs per-item offset tuning; if the mod ships a runtime hand-offset/HoldType tuner, confirm its `Register()` is actually **called** from `InitMod` (a defined-but-never-invoked registration leaves it stuck at the invisible default with no way to adjust). Verify the laser/muzzle child via `invData.model` to prove the mesh instantiated even when nothing is visible.
 

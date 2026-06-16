@@ -17,3 +17,7 @@ Learned while fixing ModForge's "No conversation found with session ID: …" err
 
 - `src-tauri/src/claude_stream.rs` — stdout thread persists `last_session_id` only on turn events; stderr thread detects the resume failure, NULLs `mods.last_session_id`, and emits `claude:resume_failed:{mod_id}`.
 - `src/components/StreamView.tsx` — listens for `claude:resume_failed`, calls `claudeStreamReset` + `claudeStreamOpen` (no resume id) to recover seamlessly.
+
+## Related
+
+- [[Claude AskUserQuestion in Headless Mode]] — another `--print` stream-json quirk (the CLI auto-fails interactive tools) handled in the same files.

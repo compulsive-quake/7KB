@@ -189,6 +189,65 @@ static Transform FindDeepChild(Transform root, string name)
 
 ---
 
+## Playing a loose .wav at runtime (no bundle)
+
+You don't need an asset bundle (or `Config/sounds.xml`) to play a custom sound —
+ship a `.wav` with the mod and build an `AudioClip` from it on the fly. This
+keeps audio out of the Unity bake pipeline entirely.
+
+- **Reference only `UnityEngine.AudioModule`** (for `AudioClip`/`AudioSource`).
+  Do **not** pull in UnityWebRequest just to load audio — parse the WAV yourself
+  and `AudioClip.Create(name, perChannelSamples, channels, sampleRate, false)` +
+  `clip.SetData(interleavedFloats, 0)`. Synchronous, main-thread, no async.
+- **WAV parse:** validate `RIFF`/`WAVE`, then walk chunks from offset 12
+  (`id`=4 bytes, `size`=4 bytes LE) looking for `fmt ` (format/channels/rate/bits)
+  and `data`. Convert 16-bit PCM via `BitConverter.ToInt16(...) / 32768f`. Chunks
+  are word-aligned (pad odd sizes by 1). Don't assume data starts at byte 44.
+- **Deploy gotcha:** `deploy.ps1` `/MIR`-excludes the lowercase `resources/` dir
+  *and wipes the destination every deploy*, so loose source files there never
+  ship. Copy the specific `.wav`s into a non-excluded dest folder (e.g.
+  `<dest>/Sounds`) in the post-`/MIR` block, exactly like the unity bundle is
+  copied. Load them at runtime from `Path.Combine(AirstrikeModApi.ModPath, "Sounds", name)`.
+- **Play 3D:** `go.AddComponent<AudioSource>()` with `spatialBlend=1`,
+  `rolloffMode=Linear`, `min/maxDistance`, `dopplerLevel=0` (keep authored pitch),
+  then `Destroy(go, clip.length + 0.25f)`. Parent the source to a moving object
+  (e.g. the jet) to make the sound travel with it. Position is origin-relative:
+  set `transform.position = worldPos - Origin.position`.
+
+See `Airstrike/src/AirstrikeAudio.cs` for the full implementation (engine + cannon
+flyby sounds choreographed to the strafe — added June 2026).
+
+---
+
+## Procedural runtime VFX (no baked assets): muzzle flash example
+
+You can build glow/flash effects entirely in code, no bundle assets:
+
+- **Glow sprite without a texture asset:** generate a `Texture2D` radial blob
+  (white-hot core → transparent black edge, `a*a` for a tight core) and put it on
+  a `GameObject.CreatePrimitive(PrimitiveType.Quad)` (delete its `MeshCollider`).
+- **Shader, safely:** don't assume a specific transparent shader exists — try a
+  chain and take the first `Shader.Find` hit: `Legacy Shaders/Particles/Additive`
+  → `Particles/Additive` → `Mobile/Particles/Additive` → `Sprites/Default` →
+  `Unlit/Transparent`. Additive (black = transparent, bright = adds to scene) gives
+  the best glow with no card edges. Set `_TintColor` (particle shaders) **and**
+  `_Color` (sprite shaders) — the irrelevant one is ignored. Degrade gracefully to
+  a light-only flash if none resolve. (This is the same shader-availability caution
+  as the magenta explosion-decal issue — see Items.md.)
+- **Framerate-independent strobe:** drive on/off from `Time.time`, not frame count:
+  `bool on = (Mathf.FloorToInt(Time.time * 2f * hz) & 1) == 0;` gives `hz` pulses/s
+  at any FPS. (Above ~half the refresh rate it aliases into a rapid flicker, which
+  reads fine for a muzzle flash. The GAU-8 is ~3900 rpm = **65 flashes/sec**.)
+- **Billboard:** in `LateUpdate`, `quad.rotation = Quaternion.LookRotation(quad.position - Camera.main.transform.position)`.
+  Both positions are floating-origin-relative, so no `Origin` correction needed
+  between them.
+- Add a strobing `Light` alongside the quad for environmental punch (works in
+  daylight where an additive quad alone can wash out).
+
+See `Airstrike/src/AirstrikeMuzzleFlash.cs` (added June 2026).
+
+---
+
 ## Audio from Asset Bundles
 
 Audio clips and `AudioSource` components can be embedded in prefabs. Find them by name:
@@ -467,3 +526,154 @@ A `ModelScale` slider on the entity's tunable API (default 1.0, range 0.02–4.0
 ## Emission map gotcha — whole model glows a flat color in-game
 
 If a placed/held custom model glows a uniform bright color (e.g. neon green legs) that you can't reproduce in the Unity editor, suspect the Standard-shader emission slot. A model-setup script that does `mat.SetTexture("_EmissionMap", tex); mat.EnableKeyword("_EMISSION"); mat.SetColor("_EmissionColor", Color.white)` will light the model by that map at full intensity in-game — **even if the committed `.mat` YAML doesn't list `_EMISSION` in `m_ValidKeywords`**, because the bundle is rebuilt from the script, not the YAML. Placeholder emissive textures are frequently a solid color block (an artist's mask UV fill), so the whole model takes that color. Fix: stop applying the emission map and explicitly neutralize it — `DisableKeyword("_EMISSION")`, `SetColor("_EmissionColor", Color.black)`, `globalIlluminationFlags = EmissiveIsBlack`. Re-enable only with a proper mostly-black emissive map that lights just the intended detail. Note the in-editor preview can look fine while the in-game shader still applies emission, so verify in-game.
+
+---
+
+## Importing a `.gltf` / `.glb` model (UnityGLTF) and the magenta-in-game gotcha
+
+7DTD model bundles are usually FBX, but glTF/GLB (e.g. Blockbench or Sketchfab
+exports) work via the **UnityGLTF** package (`org.khronos.unitygltf` from the
+Khronos GitHub repo) in `UnityProject/Packages/manifest.json`. Reference mods:
+`jigsaw` (a `.glb`), `Airstrike` (a self-contained `.gltf`). UnityGLTF registers
+a ScriptedImporter for both extensions, so `AssetDatabase.ImportAsset(path,
+ForceSynchronousImport)` then `LoadAssetAtPath<GameObject>(path)` yields the
+model. A Blockbench `.gltf` is fully self-contained (geometry + all images are
+base64 `data:` URIs in the one file) — you only need the `.gltf`, not the
+extracted `textures/` siblings. Reference mod for the glTF flow: `jigsaw` (a
+`.glb`). (Airstrike originally shipped a `.gltf` too but migrated to a native
+OBJ import in 2026-06 — see the OBJ section below.)
+
+**Critical gotcha — rebake materials onto `Standard`.** UnityGLTF assigns its
+own `UnityGLTF/PBRGraph` shader. That shader does **not** exist inside 7DTD, so
+a bundle shipped with it renders **bright magenta** in-game (shader-not-found
+pink). Convert every imported material to Unity's built-in `Standard` shader in
+the setup script before saving the prefab, copying base color + textures across:
+
+```csharp
+Material ToStandard(Material src) {
+    var m = new Material(Shader.Find("Standard"));
+    Texture albedo = FirstTexture(src, "_BaseColorTexture","baseColorTexture","_MainTex","_BaseMap")
+                     ?? src.mainTexture;
+    if (albedo) m.mainTexture = albedo;
+    foreach (var pn in new[]{"_BaseColorFactor","_BaseColor","_Color"})
+        if (src.HasProperty(pn)) { var c = src.GetColor(pn); c.a = 1f; m.color = c; break; }
+    Texture n = FirstTexture(src, "_NormalTexture","normalTexture","_BumpMap");
+    if (n) { m.SetTexture("_BumpMap", n); m.EnableKeyword("_NORMALMAP"); }
+    return m;
+}
+```
+Map old→new 1:1 and reassign `renderer.sharedMaterials`. `Standard` ships with
+the game, so it always renders. (FBX imports with `materialImportMode=
+ImportStandard` already use Standard and don't need this — it's a glTF-specific
+trap.)
+
+**Scale/units:** Blockbench glTF exports are already in metres — a low-poly A-10
+came in at ~17.8 m wingspan (real ≈ 17.5 m), so import at `globalScale = 1`.
+Still assert the renderer-bounds longest axis and log it.
+
+**Axis/orientation:** the glTF→Unity conversion (right- to left-handed, Z flip)
+makes the model's baked "forward" unpredictable headless. If a flying/driven
+model points the wrong way in-game, correct it at runtime with a yaw-offset knob
+(`LookRotation(travelDir) * Quaternion.Euler(0, yawOffset, 0)`, try 0/90/180/270)
+rather than guessing in the bake. Parent the imported GLB under an identity-root
+wrapper named "Visual" so the runtime drives a neutral transform.
+
+Headless bake is identical to the FBX flow: tag the prefab with the bundle name,
+`BuildPipeline.BuildAssetBundles(<mod>/Resources, ...)`, drive it from a
+top-level (non-namespaced) `*HeadlessBuild.Run` via `-executeMethod`, and verify
+the `Resources/*.unity3d` exists before reporting success.
+
+---
+
+## Importing an OBJ game-rip (Wraith / COD-Ghosts "iw6") — native Unity OBJ flow
+
+No special package needed: Unity's built-in model importer handles `.obj`
+directly (mesh + UVs + normals + per-`usemtl` submeshes). Reference mod:
+`Airstrike` (the A-10 swapped from glTF to a Wraith-extracted OBJ, 2026-06).
+Rips from **Wraith** (`# Generated by Wraith` header) carry several gotchas:
+
+- **Units are centimetres, axis is Z-up.** Raw A-10 spanned ~1758 units across
+  with the *smallest* span on Z (the ~430-unit vertical). Set
+  `ModelImporter.useFileScale = false; globalScale = 0.01f` (cm→m), and parent the
+  imported OBJ under an identity "Visual" child rotated `Euler(-90,0,0)` to take
+  Z-up → Unity Y-up. Verify from the bake log that the **height** axis (y) is the
+  small one (~4.3 m for an A-10) — if y is large the model is standing on its tail;
+  flip the X rotation to `+90`. (Same single-source-of-truth sizing rule as above:
+  size via `globalScale`, then *assert* bounds, never rescale from runtime bounds.)
+- **The `.mtl` texture paths are broken** (`map_Kd ..\_images\foo.tga`) and point
+  at `.tga` that may not ship. Don't rely on Unity auto-binding them. Set
+  `materialImportMode = ModelImporterMaterialImportMode.ImportStandard` so each
+  `usemtl` group becomes a named Standard material, then in the setup script
+  **bind the textures explicitly by material name** — e.g. body vs glass keyed on
+  `srcName.ToLower().Contains("glass")` — loading the PNG copies you placed in
+  `Assets/.../Source/` via `AssetDatabase.LoadAssetAtPath<Texture2D>`. Mark normal
+  maps `TextureImporterType.NormalMap` + `sRGBTexture=false` before building the
+  material (or an OnPreprocessTexture postprocessor) so `_BumpMap` is valid, and
+  set `importTangents = CalculateMikk` on the model so normal mapping works.
+- **Nose direction for the yaw knob:** find the nose programmatically by comparing
+  cross-section spread at each end of the long axis — the *narrow* end (small
+  wingspan + height spread) is the nose. For the A-10 the nose was at +X while the
+  runtime flies the prefab's +Z forward, so the heading needed `ModelYawOffset=90`
+  in items.xml (tunable without a Unity rebuild; try 270/180/0 if it flies
+  backward/sideways). Unlike FBX/glTF, OBJ imports use the Standard shader already,
+  so no magenta-rebake is needed — but rebuilding clean Standard `.mat` assets is
+  still required so they pack into the bundle as dependencies.
+
+The `.rar` a rip ships in (Wraith bundles `.obj` + `.mtl` + `.ma`/`.smd`/`.mesh.ascii`
++ `.tga` textures); extract with `7z x`, copy just the `_LOD0.obj` and the PNG
+textures into `UnityProject/Assets/.../Source/`, and delete the old source model +
+generated prefab/material assets before re-baking so stale meshes don't get bundled.
+
+---
+
+## Entity-only explosions / "no block damage" area effects (`ExplosionServer`)
+
+To damage entities in an area but never scratch terrain or builds (airstrikes,
+energy weapons, etc.), use the stock explosion API with the block fields pinned
+to zero — no custom per-entity loop needed:
+
+```csharp
+var props = new DynamicProperties();
+props.Values["Explosion.ParticleIndex"]   = idx.ToString();   // WorldStaticData.prefabExplosions index
+props.Values["Explosion.BlockDamage"]      = "0";             // <- no block damage
+props.Values["Explosion.RadiusBlocks"]     = "0";             // <- no block scan
+props.Values["Explosion.EntityDamage"]     = dmg.ToString(CultureInfo.InvariantCulture);
+props.Values["Explosion.RadiusEntities"]   = radius.ToString(); // int
+props.Values["Explosion.BlastPower"]       = "0";
+props.Values["Explosion.DamageBonus.water"]= "0";
+var data = new ExplosionData(props, null);
+if (data.BuffActions == null) data.BuffActions = new List<string>();
+GameManager.Instance.ExplosionServer(0, worldPos, World.worldToBlockPos(worldPos),
+    Quaternion.identity, data, ownerEntityId, 0f, false, sourceItemValue);
+```
+
+`ExplosionServer` handles entity damage, VFX (`ParticleIndex`), explosion sound,
+owner attribution (kills credit the player), and MP networking. With
+`RadiusBlocks=0` the block-damage pass is skipped entirely. For a dense
+"strafing line", march many of these along a path; to avoid hundreds of
+overlapping explosion **sounds**, do real damage on a coarse spacing (~2–3 m)
+and fill the gaps with cosmetic-only puffs: `Instantiate(WorldStaticData
+.prefabExplosions[i].gameObject, pos - Origin.position, ...)` with their
+`AudioSource`s muted/disabled and `Light`s disabled, `Destroy`ed after ~1 s.
+Those prefabs are pure VFX — instantiating one applies no damage. Remember every
+rendered world position needs `- Origin.position` (floating origin); the
+`ExplosionServer` call itself takes the true world position. Reference:
+`Airstrike` (`AirstrikeRunManager.cs`), modelled on `RocketTurret`.
+
+### Timing a sustained strafing gun run (aircraft)
+
+When the fire-front tracks a moving aircraft (rounds land `GunLead` metres ahead
+of the nose), the **gun run paints a line as long as the plane travels while
+firing**: `fireLength = burstSeconds * jetSpeed`. You can't get a multi-second
+burst over a *short* corridor with a fast plane — the plane crosses 60 m in 0.4 s.
+So pick the burst duration and let the visual line follow from it; keep *lethal*
+damage gated to a central sub-window (`StrafeLength`) while the rest of the line is
+cosmetic. To make the plane sit overhead the target at a fixed `T` seconds after
+spawn (to sync an engine sound), spawn it `jetSpeed * T` back along the run.
+
+For the cosmetic "walking rounds" along a long line, do **not** instantiate an
+explosion prefab per round — dozens of particle systems will hitch. Use a cheap
+billboard dust puff instead: one `GameObject.CreatePrimitive(Quad)` per round with
+an alpha-blended dust texture, scale-up + alpha-fade over ~0.45 s via a tiny
+MonoBehaviour, then self-destroy (`AirstrikeImpactPuff.cs`). Reserve the real
+grenade explosion for the lethal central impacts only.

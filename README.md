@@ -16,6 +16,7 @@ Shared knowledgebase for 7DTD mod development. Used by multiple projects (7nes, 
 - [Vehicles](Vehicles.md) — Custom vehicles (drivable mounts, hover bikes), `vehicles.xml` schema, mount/dismount pipeline, seat poses, camera switch, scripted-locomotion gotchas
 - [Networking - Connecting and Chat](Networking%20-%20Connecting%20and%20Chat.md) — ConnectionManager, sending chat via NetPackageChat, JSON escape gotcha in 7debug's /api/command
 - [Asset Bundles](Asset%20Bundles.md) — Loading custom models, particles, sounds from .unity3d bundles
+- [Player Feedback Sounds](Player%20Feedback%20Sounds.md) — Stock UI "denied" buzzers (e.g. `missingitemtorepair`) and how to play them via `Audio.Manager.PlayInsidePlayerHead`
 - [Paint & Textures](Paint%20%26%20Textures.md) — Block paint texture IDs and the paint system
 
 ## XUi (UI System)
@@ -31,6 +32,7 @@ Shared knowledgebase for 7DTD mod development. Used by multiple projects (7nes, 
 - [TTS File Format](TTS%20File%20Format.md) — TerraTerrain Storage binary format (voxel grid)
 - [NIM File Format](NIM%20File%20Format.md) — Name Index Map binary format (block ID → name)
 - [Pregen World Format](Pregen%20World%20Format.md) — `Data/Worlds/` folder layout; `main.ttw` header gotcha
+- [Extracting WEM Audio (Wwise)](Extracting%20WEM%20Audio%20(Wwise).md) — Pulling playable WAVs out of Helldivers 2 `.patch_0`/`.stream` Wwise archives with vgmstream (sourcing mod sound assets)
 - [Block Data Structures](Block%20Data%20Structures.md) — Key data structures for prefab import
 - [Block Definition Resolution](Block%20Definition%20Resolution.md) — How block IDs resolve to definitions
 - [Prefab Import Pipeline](Prefab%20Import%20Pipeline.md) — Full flow from prefab selection to placed voxels

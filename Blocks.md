@@ -68,6 +68,21 @@ public class BlockMyBlock : Block
 | `IsTerrainDecoration` | `"false"` | Whether it floats on terrain |
 | `ActivationText` | `"Open"` | Prompt shown when looking at block |
 
+### Collision / "can be walked through" (C#)
+
+`Block.BlockingType` is a bitmask; the per-channel booleans are derived from it:
+
+| Property | Bit | Meaning |
+|---|---|---|
+| `IsCollideMovement` | `& 2` | Blocks entity/player movement. **False for grass, plants, and other pass-through decorations.** Use this to tell "is this block actually solid to walk into" — air-vs-non-air (`BlockValue.isair`) is not enough, since grass is a non-air block you can walk through. |
+| `IsCollideSight` | `& 1` | Blocks line of sight |
+| `IsCollideBullets` | `& 4` | Stops bullets |
+| `IsCollideRockets` | `& 8` | Stops rockets/explosives |
+| `IsCollideMelee` | `& 0x10` | Stops melee |
+| `IsCollideArrows` | `& 0x20` | Stops arrows |
+
+For face-aware solidity (partial shapes), use `Block.IsMovementBlocked(world, pos, blockValue, face)`.
+
 ---
 
 ## Shape Types
@@ -272,6 +287,8 @@ See also: [Power Sources](Power%20Sources.md) for custom power generator blocks,
 > **Vanilla block names**: There is no `steelBlock` or `concreteBlock` in vanilla 7DTD. Shape blocks may require a `:variant` suffix (e.g. `steelShapes:cube`) to resolve via `Block.GetBlockValue`. Plain `steelShapes` returns air in V 2.5 — always try the `:cube` variant first. Other notable blocks: `steelMaster`, `concreteMaster`, `concreteNoUpgradeMaster`.
 
 > **`Shape="Ext3dModel"` crashes the game** — Despite existing in the code as `BlockShapeExt3dModel`, this shape type is not used by any vanilla block and throws `InvalidCastException` in `createVertices()` when loading custom prefabs. This error crashes the entire `blocks.xml` parser, which cascades into failures for items.xml, recipes.xml, loot.xml, quests.xml, traders.xml, and biomes.xml (since they all depend on blocks being loaded). **Always use `Shape="ModelEntity"` for custom 3D model blocks.**
+
+> **`GameManager.ExplosionServer` can't be made block-safe by zeroing `Explosion.BlockDamage`/`RadiusBlocks`.** In `Explosion.AttackBlocks` the radius is floored to `0.01` (so `num2 = CeilToInt = 1`, the 3×3×3 epicenter loop always runs), and when the explosion is attributed to an `EntityAlive` instigator the per-block damage is computed as `BlockDamage * blockDamageScale + 0.5f` — i.e. a hard-coded **+0.5 minimum** at the epicenter regardless of your props. For most blocks the resulting rounded damage is 0, but **hardness-0 props (parked cars, some decorations) take the `else` branch `num8 = MaxDamage / landProtMod`, destroying them in one hit** → they downgrade to their burnt wreck `DowngradeBlock`. Passing `entityId = -1` makes block damage truly 0 (the `+0.5` is gated on a non-null instigator) but loses kill XP / quest events. To shred entities while *never* touching blocks AND keeping XP, skip `ExplosionServer` entirely and apply damage yourself: `Physics.OverlapSphere(pos - Origin.position, radius, -538480645)` → filter colliders whose tag starts with `E_BP_` → `GameUtils.GetHitRootTransform(tag, t).GetComponent<EntityAlive>()` → `entity.DamageEntity(new DamageSourceEntity(EnumDamageSource.External, EnumDamageTypes.Piercing, ownerId, dir, t.name, Vector3.zero, Vector2.zero){AttackingItem=item}, dmg, false)`, then `(owner as EntityPlayer)?.AddKillXP(entity)` on a fresh kill. (Airstrike mod uses exactly this.)
 
 > **`world.SetBlock` and stability**: The 4th parameter of `world.SetBlock(clrIdx, pos, blockValue, updatePhysics, notify)` controls whether structural integrity (SI) is recalculated. If set to `false`, placed blocks will have a stability of 1 instead of their proper value. Always pass `true` for `updatePhysics` when placing blocks that need correct stability (e.g. building structures). Hand-placed blocks go through the game's normal placement path which always recalculates SI.
 
