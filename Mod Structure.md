@@ -72,6 +72,13 @@ Part of the [7DTD Modding Knowledgebase](README.md). Covers folder layout, ModIn
   - `UnityEngine.dll` — Unity base
   - `UnityEngine.CoreModule.dll`
   - `UnityEngine.ImageConversionModule.dll` — for `Texture2D.LoadImage`
+  - `UnityEngine.InputLegacyModule.dll` — **required for the legacy `Input` class** (`Input.GetKey`, `Input.GetKeyDown`, etc.). Modern Unity splits `Input` out of CoreModule into this module; `KeyCode` resolves from CoreModule but `Input` does **not**. Without this reference you get `CS0103: The name 'Input' does not exist in the current context`.
+
+> **Numpad / NumLock gotcha:** On Windows, when NumLock is **off** the numeric keypad does not emit `KeyCode.Keypad*` at all — the OS sends the navigation keys instead (numpad 8→`UpArrow`, 2→`DownArrow`, 4→`LeftArrow`, 6→`RightArrow`, 9→`PageUp`, 7→`Home`, 1→`End`, 3→`PageDown`, 0→`Insert`, `.`→`Delete`; numpad 5 sends `VK_CLEAR`, which has no usable Unity `KeyCode`). So `Input.GetKeyDown(KeyCode.Keypad6)` silently never fires for a user with NumLock off — no error, key just does nothing. Symptom: "the numpad controls don't work." Fix: accept both the `Keypad*` code and its nav-key alias for each binding, and never use `Keypad5` as a modifier (pick `LeftShift`/`RightShift` instead). Airstrike's designator laser-origin tuner (`AirstrikeLaserOrigin.HandleAdjustInput`) does this.
+
+> **`OnHoldingUpdate` is a throttled tick, not a per-frame callback:** `ItemAction.OnHoldingUpdate` does **not** fire every rendered frame, so polling `Input.GetKeyDown` inside it silently drops most presses — `GetKeyDown` is true for only one frame per press, and that frame usually lands between the throttled calls. Symptom: "pressing several times only moves once, then a long delay before it'll respond again." Fix: poll input from a real Unity `Update()`. Attach a small `MonoBehaviour` to a GameObject you already own (e.g. the laser object) and do the `Input` polling there; keep `OnHoldingUpdate` for visuals only. Airstrike's designator does this via `AirstrikeLaserTuner : MonoBehaviour`. (`Input.GetKey`/held-state polling tolerates the throttle, but edge detection via `GetKeyDown` does not.)
+
+> **Silent-deploy gotcha:** `deploy.ps1` runs `build.ps1` first and aborts the whole deploy (robocopy never runs) if the build fails. A compile error therefore leaves the **old DLL** in the Mods folder, and modman's `status` stays `yellow` with `deployedId` unchanged. Symptom: "I deployed and restarted but my code change does nothing." Always confirm the build actually succeeded — check that the root `Airstrike.dll` timestamp is fresh, or grep the DLL bytes for a new symbol name.
 
 ---
 

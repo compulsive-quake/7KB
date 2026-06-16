@@ -121,3 +121,100 @@ To change a property on an existing entity:
     <set xpath="/entity_classes/entity_class[@name='playerMale']/effect_group/passive_effect[@name='BagSize']/@value">100</set>
 </configs>
 ```
+
+---
+
+## Local Player Camera View (first ↔ third person, C#)
+
+`EntityPlayerLocal` controls which view the local player is in. Useful when a
+mod takes over the screen (e.g. a remote camera / drone feed) and needs the
+player's body to look right to *other* cameras.
+
+- `bFirstPersonView` (public bool) — current view state; read it to remember
+  the player's choice before changing it.
+- `SetFirstPersonView(bool firstPerson, bool lerpPosition)` — the canonical
+  toggle. It swaps the visible model (`switchModelView` →
+  `emodel.SwitchModelAndView`), moves/attaches the camera, sets the `.IsFPV`
+  cvar, fires `MinEventTypes.onSelfChangedView`, and toggles
+  `characterMatrixOverride`. Pass `lerpPosition: false` for an instant snap.
+- `SwitchFirstPersonViewFromInput()` is the input wrapper; it refuses to switch
+  when `vp_FPCamera.Locked3rdPerson`, when `AttachedToEntity != null` (in a
+  vehicle/turret), or when `CameraRestrictionMode > 0`. Call
+  `SetFirstPersonView` directly to bypass those guards.
+
+**Headless first-person body gotcha:** in first person the player renders a
+*headless* body model (the head is hidden so it doesn't clip the FP camera).
+Any other camera (a second/render-texture camera looking back at the operator)
+therefore sees a headless body. Fix: call `SetFirstPersonView(false, false)`
+while that camera is active so the full third-person model (with head) renders,
+and restore the saved `bFirstPersonView` afterwards. The model sits on layer 24
+in *both* views (`SetModelLayer(24)` runs for FirstPerson and ThirdPerson
+alike), so a camera that already renders your FP arms will also render the TP
+body — no culling-mask change needed; only the visible mesh/head swaps.
+
+`EnumEntityModelView` has just two values: `FirstPerson`, `ThirdPerson`.
+
+Used by the FPV drone mod: when the drone feed activates it flips the operator
+to third person so the drone sees a complete body, and restores first person
+when control returns.
+
+**Gotcha — restore order vs. `SetControllable`:** the player camera rig is bound
+to controllability. If you `SetControllable(false)` while taking over the screen,
+you must restore control **before** calling `SetFirstPersonView(true, …)`.
+Re-applying the view while the player is still flagged non-controllable can fail
+to take, leaving `cameraTransform` parked in its third-person pose. Anything that
+reads `cameraTransform` for aiming (the Airstrike / RocketTurret laser pointers
+build their beam *origin and direction* from it) then draws from the wrong basis
+— the lasers look broken until the player toggles view manually. Order on
+teardown: `SetControllable(true)` → restore HUD → `SetFirstPersonView(true,
+false)`. (FPV drone bug: flying the drone broke both laser mods; fixed by this
+reorder in `RestoreHudAndPlayerControl`.)
+
+### Anchoring first-person held-item visuals (lasers, beams, muzzle effects)
+
+`EntityPlayerLocal` exposes public fields for the FP camera:
+
+- `cameraTransform` (`Transform`) — the first-person camera transform. Its
+  position and `right`/`up`/`forward` basis already include **view bob, weapon
+  sway, and the exact pitch pivot**. The held FP item model is parented under
+  this camera.
+- `playerCamera` / `finalCamera` (`Camera`), `cameraContainerTransform`,
+  `ModelTransform` (`Transform`), `vp_FPCamera` (property) are also public.
+
+To make a visual *emit from the held item* (e.g. a laser starting at the
+flashlight), build the start point from `cameraTransform`:
+
+```csharp
+Transform cam = localPlayer.cameraTransform; // null-check; cast holder as EntityPlayerLocal
+Vector3 start = cam.position + cam.right * R + cam.up * U + cam.forward * F;
+```
+
+Do **not** derive it from `getHeadPosition()` + a basis built off
+`GetLookVector()`: that uses the logical head bone, which is a *different pivot
+with no view bob*, so the visual drifts vertically when pitching and jitters
+when walking/running. (Airstrike designator laser bug, fixed this way.)
+Remember to subtract `Origin.position` before handing the world point to a
+`LineRenderer`/GameObject — see [Entity Positions](Entity Positions.md).
+
+**Coordinate space:** `cameraTransform.position` is a Unity `Transform.position`
+— already render-space (origin-relative). `getHeadPosition()` returns un-shifted
+**world** coords. Don't mix them: to use the camera position in world-space math
+(e.g. a `Voxel.Raycast`, which works in un-shifted world space), add
+`Origin.position`; to feed it to a world-space `LineRenderer`, leave it as-is.
+
+**Crosshair alignment:** to make a painted point / raycast land under the center
+crosshair at every pitch, cast from `cameraTransform.position (+Origin.position)`
+along `cameraTransform.forward` — *not* `getHeadPosition()`/`GetLookVector()`.
+The head bone sits above/behind the camera pivot, so at steep pitch the parallax
+pushes a near hit point visibly off the crosshair.
+
+**Following the held-item model's own sway:** `cameraTransform` carries the
+camera *view-bob*, but the FP weapon/item model has additional procedural sway
+layered on top. To anchor a visual to the actual model (so it follows that extra
+sway), use `EntityAlive.inventory.GetHoldingItemTransform()` (public, returns the
+live held-item `Transform`; render-space, so `+Origin.position` like the camera).
+Null during holster/draw — fall back to `cameraTransform`. A good pattern: base
+the *position* on the model transform but keep the *offset basis* from
+`cameraTransform` (right/up/forward) so screen-relative tuning stays intuitive.
+Related: `ItemInventoryData.model` (`Transform`) and
+`Inventory.lastdrawnHoldingItemTransform`.
