@@ -170,6 +170,37 @@ teardown: `SetControllable(true)` → restore HUD → `SetFirstPersonView(true,
 false)`. (FPV drone bug: flying the drone broke both laser mods; fixed by this
 reorder in `RestoreHudAndPlayerControl`.)
 
+### Secondary RenderTexture cameras render too dark (PostProcessing v2)
+
+7DTD renders in **linear** color space and the main camera relies on a
+PostProcessing-Stack-v2 `PostProcessLayer` (tonemapping, color grading,
+auto-exposure) to map linear output to the final on-screen image. A bare
+secondary `Camera` (e.g. a drone/scope feed rendering to a `RenderTexture`)
+skips all of it, so its feed looks noticeably **darker and flatter** than the
+normal view — even in daylight. Copying `cullingMask`/`clearFlags`/`allowHDR`
+is not enough.
+
+Fix: clone the main camera's `PostProcessLayer` onto the secondary camera.
+Reference `Unity.Postprocessing.Runtime.dll` (in `…/Managed`), then:
+
+```csharp
+using UnityEngine.Rendering.PostProcessing;
+var src = Camera.main.GetComponent<PostProcessLayer>();
+// PostProcessResources lives in a private field — reuse the main camera's.
+var res = (PostProcessResources)typeof(PostProcessLayer)
+    .GetField("m_Resources", BindingFlags.NonPublic | BindingFlags.Instance)
+    .GetValue(src);
+var layer = camGo.AddComponent<PostProcessLayer>();
+layer.Init(res);
+layer.volumeLayer = src.volumeLayer;          // else no volumes apply
+layer.volumeTrigger = camGo.transform;         // sample volumes at the cam
+layer.antialiasingMode = src.antialiasingMode;
+```
+
+The grading/tonemapping is a **global** volume, so any `volumeTrigger` picks it
+up; using the camera's own transform also respects local post volumes it moves
+through. (FPV drone feed darkness bug, fixed this way.)
+
 ### Anchoring first-person held-item visuals (lasers, beams, muzzle effects)
 
 `EntityPlayerLocal` exposes public fields for the FP camera:
