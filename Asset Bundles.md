@@ -474,6 +474,23 @@ If a placed/held custom model glows a uniform bright color (e.g. neon green legs
 
 ---
 
+## Washed-out / pale custom HELD item (textures load but look bright & desaturated)
+
+If a custom **held** item (weapon/tool) shows the *right* texture but **washed out, over-bright, and desaturated** — the hue is faintly there but it looks like a pale grey ghost of the real texture — the bundle is fine; it's the Standard shader's **glossy reflection + specular** on a held item. A 7DTD held item is drawn by the first-person weapon camera (in BOTH first and third person — see Items.md HoldingItem layer) and has **no reflection probe**, so a Standard material with `_GlossyReflections=1` / specular on samples the bright default skybox/ambient cube and lifts the albedo toward white. World *entities* (vehicles, turrets, drones) don't show this because they sit in real reflection probes — so "other mods look fine, only the held weapon is washed" is the tell, not a color-space bug.
+
+Things that are NOT the cause (verified on Quake-Weapons, June 2026, by cracking the bundle with `UnityPy`): texture pixel data (bundle mean RGB matched the source exactly), missing UVs, `m_ColorSpace` (held weapon albedo was `1`/sRGB, same as working mods), project color space (all these mods are Gamma `m_ActiveColorSpace: 0` and the world-entity ones render fine), shader stub (the bundled `Standard` had real compiled sub-programs), or material→texture wiring (all renderers resolved to textured mats).
+
+Fix in the model-setup script when baking the Standard material: go fully matte/non-reflective so only `albedo*light` shows (Quake-era view models are essentially flat/diffuse anyway). This mirrors what zPhone's held model already does (`_GLOSSYREFLECTIONS_OFF`):
+```csharp
+m.SetFloat("_Metallic", 0f);
+m.SetFloat("_Glossiness", 0f);
+m.SetFloat("_GlossyReflections", 0f);     m.EnableKeyword("_GLOSSYREFLECTIONS_OFF");
+m.SetFloat("_SpecularHighlights", 0f);    m.EnableKeyword("_SPECULARHIGHLIGHTS_OFF");
+```
+Verify in-game (the editor preview, lit by a probe, can look fine either way). If a weapon genuinely needs a metallic sheen, the alternative is to give the held rig a reflection probe, but matte is the simpler, robust default for game-rip weapon textures.
+
+---
+
 ## Importing a `.gltf` / `.glb` model (UnityGLTF) and the magenta-in-game gotcha
 
 7DTD model bundles are usually FBX, but glTF/GLB (e.g. Blockbench or Sketchfab

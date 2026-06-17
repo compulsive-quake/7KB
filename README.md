@@ -16,7 +16,9 @@ Shared knowledgebase for 7DTD mod development. Used by multiple projects (7nes, 
 - [Vehicles](Vehicles.md) — Custom vehicles (drivable mounts, hover bikes), `vehicles.xml` schema, mount/dismount pipeline, seat poses, camera switch, scripted-locomotion gotchas
 - [Networking - Connecting and Chat](Networking%20-%20Connecting%20and%20Chat.md) — ConnectionManager, sending chat via NetPackageChat, JSON escape gotcha in 7debug's /api/command
 - [Asset Bundles](Asset%20Bundles.md) — Loading custom models, particles, sounds from .unity3d bundles
+- [Runtime Procedural VFX](Runtime%20Procedural%20VFX.md) — Runtime LineRenderer/particle effects with no bundle; the `HideAndDontSave` texture/material gotcha, procedural lightning, world→scene space
 - [Player Feedback Sounds](Player%20Feedback%20Sounds.md) — Stock UI "denied" buzzers (e.g. `missingitemtorepair`) and how to play them via `Audio.Manager.PlayInsidePlayerHead`
+- [Camera View Switching (First/Third Person)](Camera%20View%20Switching%20(First-Third%20Person).md) — `SetFirstPersonView`/`SetCameraAttachedToPlayer` internals; `playerCamera.transform` IS `cameraTransform`; the cross-mod bug where a temporary view switch leaves the camera + held-item transforms parked and breaks other mods' laser/aim (cone beam, targets own head), and the multi-frame re-assert fix
 - [Paint & Textures](Paint%20%26%20Textures.md) — Block paint texture IDs and the paint system
 
 ## XUi (UI System)

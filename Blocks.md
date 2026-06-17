@@ -266,6 +266,8 @@ Minimum XML properties mirror vanilla `autoTurret`:
 
 In C#, inherit from `BlockRanged`, call base activation methods, and bind runtime behavior to `TileEntityPoweredRangedTrap.ItemSlots`/`DecrementAmmo(...)` rather than storing a parallel ammo count. If migrating an existing save from a custom `TileEntity`, replace stale tile entities with `CreateTileEntity(chunk) as TileEntityPoweredRangedTrap` and carry over old ammo before opening the window.
 
+**Reading loaded ammo (per type + count).** `ItemSlots` is the member that gives you both: it's `ItemStack[]` (each non-empty slot has `.itemValue` and `.count`), so to tally rockets by type across turrets, iterate `ItemSlots`, skip `count <= 0`, group by `stack.itemValue.ItemClass.Name`, and label rows with `ItemClass.GetLocalizedItemName()`. Don't reach for the obvious-sounding members — verified against the assembly (RocketTurret, June 2026): `AmmoItems` is `ItemClass[]` (the accepted/loaded ammo *types*, no counts); `CurrentAmmoItem()` returns only the single active `ItemClass`; and `GetAmmoCount()`/`GetItems()`/`GetSlots()` exist elsewhere in Assembly-CSharp but are **NOT** on `TileEntityPoweredRangedTrap` (a raw string-grep finds the name globally and misleads — reflect the actual type with an `AssemblyResolve` pointing at `…/Managed` to confirm membership before coding against it).
+
 ### Custom class in mod DLL
 
 For mod block classes, use the `"ClassName, AssemblyName"` format in the `Class` property:
