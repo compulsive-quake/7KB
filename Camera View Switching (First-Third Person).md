@@ -78,3 +78,35 @@ for (int i = 0; i < 3; i++)
 
 Implemented in FPV `FPVDroneManager.RestoreHudAndPlayerControl` /
 `FinalizeFirstPersonRestore`. See also [[Player Feedback Sounds]].
+
+## Defending the *consuming* mod (when the switcher is vanilla)
+
+The re-assertion fix only helps when you control the switching code. **Vanilla
+view switches don't run it** — e.g. taking over a powered SMG/auto turret parks
+the camera the same way, and you can't patch its restore. So a designator-style
+mod that reads the camera must **detect and self-heal on its own**, not trust the
+camera blindly.
+
+Detection without a clean reference transform: compare the camera position to the
+head. They're the same space once you shift the render-space camera back to world
+space — `cam.transform.position + Origin.position` vs `holder.getHeadPosition()`.
+In real first person that gap is well under a metre; a parked third-person camera
+is metres behind/above. Past ~1 m, treat the camera as parked.
+
+When parked:
+- **Aiming**: fall back to `getHeadPosition()` + `GetLookVector()` for the raycast
+  origin/direction. Casting from the parked camera is what drops the strike on the
+  operator's own head.
+- **Laser origin**: skip the camera/held-item basis (it's behind the lens → cone);
+  use the head/look basis instead.
+- **Self-heal**: while the tool is out the player is in first-person gameplay, so
+  if `bFirstPersonView` is still true but the camera is parked, call
+  `SetCameraAttachedToPlayer(true,false)` (resets the camera pose *synchronously*,
+  so it's usable the same frame) and `inventory.ForceHoldingItemUpdate()` once
+  (throttled) to un-park the held model. Skip the heal when `bFirstPersonView` is
+  false so a *deliberate* third-person toggle isn't yanked back.
+
+Implemented in RocketTurret `ItemActionRocketTurretPointer.IsCameraParked` +
+`RocketTurretLaserView.LateUpdate` (self-heal) + `TryGetPaintedTarget` (aim
+fallback). Note: the earlier "read `playerCamera` instead of `cameraTransform`"
+workaround there was a no-op for exactly the reason above — they're one transform.
