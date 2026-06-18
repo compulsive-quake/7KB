@@ -18,6 +18,7 @@ Shared conventions for the ModForge desktop app UI.
 
 ## Codex launch compatibility
 
+- Agent binary settings should keep the editable text field visible and place discovery actions beside it. Claude Code uses `settings_discover_claude_binary` to search PATH/Get-Command for `claude`; Codex uses `settings_discover_codex_binary` plus its Windows app-package fallbacks.
 - Codex config `service_tier = "priority"` is obsolete for current Codex builds; startup fails with `unknown variant 'priority', expected 'fast' or 'flex'`. Use `service_tier = "fast"` as the direct replacement, and have ModForge sanitize that line when it edits `~/.codex/config.toml` for project trust.
 - ModForge's Codex model picker maps UI labels to Codex config overrides: `GPT-5.5` -> `model = "gpt-5.5"`, `Extra High` reasoning -> `model_reasoning_effort = "xhigh"`, and speed choices -> `service_tier = "fast"` or `"flex"`. Apply these as `codex exec -c ...` overrides instead of relying on the user's global config file.
 
@@ -29,6 +30,7 @@ Shared conventions for the ModForge desktop app UI.
 - Agent sessions must get the KB checkout from ModForge settings, never by guessing `../7KB`. Add configured `kb_repo_path` to Codex workspace-write roots, include it in Codex per-turn prompts, and stamp it into managed per-mod `CLAUDE.md`/`AGENTS.md` blocks.
 - Do not update a mod's `CLAUDE.md` or `AGENTS.md` unless that mod is currently opened in ModForge. This prevents background or unrelated mod folders from receiving managed-agent-file edits.
 - The Knowledge Base opens as a full-window top-right toolbar section (`section="kb"`), like Settings/Game/Mod Manager. Do not expose it as a left activity-rail side panel.
+- Dirty Knowledge Base git status is surfaced globally: poll `kb_status`, show an amber count badge on the top-right KB toolbar icon, and show the changed-file list plus a `Commit & Push` button in the KB reader. The commit action stages all KB changes and uses the generic message `more knowledge` before pushing.
 - The right dock cluster (Run panel, Action Log panel, and right activity rail) is only visible in the main Mods workspace. Hide it in top-right full-window sections such as Knowledge Base, Settings, Game, and Mod Manager.
 
 ## Git commit author identity

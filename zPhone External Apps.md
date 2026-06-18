@@ -38,3 +38,7 @@ When deleting an app, also clean the **deployed** mod folder: a `Copy-Item`-base
 The `toggle` control is a button-style control: `{ "type": "toggle", "label", "action", "method", "stateField" }`. It sends `{ method }` through the action (same shape as `button`) and renders on/off from the boolean `stateField` in the state event — so the C# side implements it as a parameterless method that flips the bool, and `SendState()` reports it.
 
 Note the deploy gotcha for saved tuning files: a `robocopy /MIR` deploy (ModForge default) deletes runtime-saved JSON under the deployed mod's `Config/` on every redeploy, because the file doesn't exist in the source repo. Read the saved values out of the deployed folder (or copy the JSON into the repo's `Config/`) before the next deploy.
+
+## Gotcha: leftover deployed manifests
+
+zPhone scans deployed mod folders for `zphone/app.json` — not the source repo. If a mod deletes `zphone/app.json` from source but the deploy script never cleans the destination, the deployed copy survives and zPhone keeps registering the app. When the player opens that orphaned page the bridge logs `no handler for action '<id>.requestState'` (the C# `Register()` is gone). Fixes: either drop the leftover deployed folder, or have the deploy script copy `zphone/` with a pre-clean (remove-then-copy) so source deletions propagate. Symptom in logs: `[zPhone] Bridge: no handler for action 'X.requestState'`.

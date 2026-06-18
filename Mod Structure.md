@@ -59,6 +59,8 @@ Part of the [7DTD Modding Knowledgebase](README.md). Covers folder layout, ModIn
 
 > Note: `SkipWithAntiCheat value="true"` marks the mod as requiring EAC to be disabled. Set this for any mod that includes a C# DLL. The game will skip loading the mod (rather than crash) when EAC is active.
 
+> **`<Name>` must match `^[0-9a-zA-Z_\-]+$`** — letters, digits, underscore, and hyphen only. **No spaces.** A space (or any other character) makes the loader log `ERR [MODS] <Folder>/ModInfo.xml does not define a valid non-empty Name … ignoring` and skip the ENTIRE mod (no items.xml merged, no DLL loaded, no localization). The mod folder name on disk can still have spaces — only the `<Name>` element value is regex-checked. Put any pretty/spaced label in `<DisplayName>` instead. Symptom: "I deployed the mod and nothing appears in-game" with no items.xml / sounds.xml load errors anywhere — they don't appear because the mod was rejected before XML merge ever ran.
+
 ---
 
 ## DLL Loading
