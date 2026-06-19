@@ -138,6 +138,50 @@ thinning is the correct result, not ballooning. Reference: Airstrike
 `src/ItemActionAirstrikeDesignator.cs` (`EnsureLaser` sets the alignment;
 `AirstrikeLaserView.LateUpdate` builds the perpendicular normal).
 
+### ⚠️ TransformZ does NOT actually work in 7DTD's engine — use a quad mesh
+
+The `LineAlignment.TransformZ` fix above is the *documented* Unity behaviour, but
+in 7DTD's build (Unity 2022) the LineRenderer **ignores it and billboards anyway**.
+Verified at runtime: `LineRenderer.alignment` read back as `Local` (the old name
+for the `TransformZ` enum value, confirming it was set), `Shader.Find("Hidden/
+Internal-Colored")` returned non-null (depth-off material fine), the beam ran
+`beamVsViewDeg ≈ 0.2°` with widths of 3–9 mm — and it *still* exploded the far
+vertex into a screen-filling wedge. So setting `alignment = TransformZ` + rotating
+`transform.forward` at the camera has **no effect**; the engine billboards the line
+as if it were `View`. There is no renderer-level knob that fixes it.
+
+Robust fix: **stop using LineRenderer entirely and build the beam as a hand-made
+two-triangle quad** (`MeshFilter` + `MeshRenderer` + a dynamic `Mesh`), computing
+the width direction yourself so there's no billboard to degenerate. Keep the GameObject
+at identity transform and write vertices in render-space world coords (`world -
+Origin.position`). Per frame, with the beam clamped in front of the near plane:
+
+```csharp
+Vector3 beamDir = (targetRender - startRender).normalized;
+Vector3 camPos  = viewCam.transform.position;            // render space
+// Width ⟂ beam AND ⟂ eye-ray → ribbon faces the camera, width lies across screen.
+Vector3 wsDir = Vector3.Cross(beamDir, camPos - startRender);
+if (wsDir.sqrMagnitude < 1e-8f) wsDir = viewCam.transform.right;   // sighting down beam
+Vector3 weDir = Vector3.Cross(beamDir, camPos - targetRender);
+if (weDir.sqrMagnitude < 1e-8f) weDir = viewCam.transform.right;
+Vector3 ws = wsDir.normalized * halfWidthStart;          // half-widths (offset each way)
+Vector3 we = weDir.normalized * halfWidthEnd;
+verts[0]=startRender+ws; verts[1]=startRender-ws; verts[2]=targetRender+we; verts[3]=targetRender-we;
+// tris {0,2,1, 2,3,1}; per-vertex colours (Internal-Colored passes vertex colour
+// through ×_Color=white); mesh.RecalculateBounds() each frame or it frustum-culls.
+```
+
+The cross-product width is perpendicular to the beam by construction (no
+projection/degeneracy maths needed) and the quad turns its face to the camera, so
+it's a clean constant-width ribbon at every angle and thins to a sliver only when
+sighting straight down the beam (correct). Note the width is **world-space** (tapers
+with distance, like the old LineRenderer width did) — scale each half-width by
+`distance(end, camPos)` if you want constant *screen* thickness instead. Reference:
+RocketTurret `src/ItemActionRocketTurretPointer.cs` (`RocketTurretLaserView` builds
+the quad; `EnsureLaser` creates the mesh). Airstrike still uses the LineRenderer
++ TransformZ path and exhibits the wedge — port the quad approach there too if it's
+ever noticed.
+
 Surface-hit data, if you ever need the normal instead: 7DTD's voxel raycast
 returns `Voxel.voxelRayHitInfo` (`WorldRayHitInfo`); `.hit` is a `HitInfoDetails`
 struct with `Vector3 pos`, `Vector3i blockPos`, `BlockFace blockFace`,
@@ -252,6 +296,79 @@ MonoBehaviour's `m_Script.m_ClassName` and `read_typetree()` for its fields.
 
 Reference: Airstrike `src/AirstrikeExplosionFx.cs` (lethal cannon impacts spawn the
 grenade explosion, light-stripped + smoke/dust-pruned; entity damage applied in code).
+
+## Loading a shipped PNG at runtime for an OnGUI overlay
+
+Sometimes you want a real image (a product photo, a UI overlay) rather than a
+procedural texture. You can ship a `.png` in the mod and decode it at runtime —
+but two non-obvious things bite:
+
+**1. `Texture2D.LoadImage(byte[])` needs an extra assembly reference.** It is an
+extension method in `UnityEngine.ImageConversionModule`, *not* CoreModule.
+Without the reference the build fails with `CS1061: 'Texture2D' does not contain
+a definition for 'LoadImage'`. Add to the `.csproj`:
+
+```xml
+<Reference Include="UnityEngine.ImageConversionModule">
+  <HintPath>$(ManagedDir)\UnityEngine.ImageConversionModule.dll</HintPath>
+  <Private>false</Private>
+</Reference>
+```
+
+```csharp
+var tex = new Texture2D(2, 2, TextureFormat.RGBA32, false); // size is replaced by LoadImage
+if (tex.LoadImage(File.ReadAllBytes(path))) { tex.wrapMode = TextureWrapMode.Clamp; ... }
+```
+
+**2. Find the file via the mod path, not a relative path.** Capture `Mod.Path`
+in your `IModApi.InitMod` (`ModPath = _modInstance.Path;`) and
+`Path.Combine(ModPath, "Resources", "name.png")`. The CWD at runtime is the game
+dir, so a relative path won't resolve. PNG load is a per-file decode, not an
+Addressables/bundle lookup — no `#@modfolder:` syntax needed (that's only for
+`.unity3d` bundles, see [Asset Bundles](Asset%20Bundles.md)).
+
+**3. `deploy.ps1` copies an explicit allow-list of files — add new assets to it.**
+The script enumerates each file/folder it copies (ModInfo, dll, Config, the
+bundle, …); a newly-added PNG under `resources/` is **not** picked up unless you
+add a `Copy-Item` for it. Symptom: works in dev, missing in the deployed mod, and
+the `File.Exists` guard logs "not found". Cache the decoded texture in a `static`
+and latch failures so you don't retry the disk read every activation. (As with
+procedural textures, set `HideAndDontSave` if it must survive world transitions.)
+
+**Keying a white background to alpha (Pillow).** To turn a product photo on a
+white background into a transparent-surround overlay, flood-fill from the four
+corners with a sentinel colour (so only *background-connected* white is keyed —
+interior highlights survive), build the alpha from that mask, and feather with a
+~0.8px Gaussian blur to kill the silhouette halo:
+
+```python
+flood = im.copy()
+for c in [(0,0),(w-1,0),(0,h-1),(w-1,h-1)]:
+    ImageDraw.floodfill(flood, c, (255,0,255), thresh=32)
+bg = np.all(np.array(flood) == (255,0,255), axis=-1)
+alpha = Image.fromarray(np.where(bg,0,255).astype("uint8")).filter(ImageFilter.GaussianBlur(0.8))
+```
+
+**Slide-in + crossfade in `OnGUI`.** Stamp a start time when the intro begins,
+then in `OnGUI` (inside the 1080p virtual canvas) lerp the image's Y from
+above-screen to a rest pose with an ease-out-*back* (overshoot+settle gives a
+hand-pulled feel), and drive a black backdrop's + the image's alpha down together
+for a quick crossfade that reveals what's underneath. To "fill the screen" with a
+product photo that has a transparent margin, draw it **larger than the canvas**
+(e.g. 1.5× canvas width, square) and position by a feature anchor (lens-centre
+fraction) rather than the image centre, so the subject lands where the eye expects
+it and the margins crop off-screen.
+
+**Hide a hard cut behind the opaque overlay.** A camera/POV switch (e.g. 7DTD's
+first↔third-person swap + a new RenderTexture feed) is a jarring instant cut. If
+an opaque full-screen overlay is mid-animation, defer the switch until the overlay
+**fully covers the screen**, do the cut behind it, then crossfade the overlay away
+— the viewer never sees the seam. In FPV the drone holds its hover pose in a
+dedicated `GogglesIntro` launch-phase (normal player view still rendering) while
+the goggles slide down; only at slide-end (goggles fully down + blackout at max)
+does `ActivateFpvView` run, then the crossfade dissolves the goggles into the live
+feed. Reference: FPV `src/FPVDroneManager.cs` (`BeginGogglesIntro`,
+`UpdateGogglesIntro`, `DrawGogglesIntro`, `EaseOutBack`).
 
 ## World → scene space
 

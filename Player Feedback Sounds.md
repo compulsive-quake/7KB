@@ -86,6 +86,35 @@ mod's `PortalSounds`); used by the God app's Thunder + Kill-Everything buttons.
 For mass effects (kill-all), play **one** clap for the whole volley, not one per
 target, or you get a wall of overlapping claps.
 
+## Looping "while-equipped" weapon hum (no native item property)
+
+7DTD has **no item property for a sound that loops the whole time a weapon is
+selected**. `Action0`'s `Sound_start`/`Sound_loop` only play while the trigger
+is held (firing), not at idle. To reproduce a Quake-style idle hum/whir
+(Gauntlet, Lightning Gun, Railgun, BFG `*_hum` clips), drive a looping Unity
+`AudioSource` yourself off the locally-held item:
+
+- A `DontDestroyOnLoad` MonoBehaviour polls the held item each `Update`:
+  `GameManager.Instance.World.GetPrimaryPlayer().inventory.holdingItem` returns
+  the current `ItemClass` (`holdingItem` is `public virtual ItemClass`, falls
+  back to the bare-hand item when nothing's drawn); `.GetItemName()` gives the
+  items.xml name to look up in a name→clip map.
+- Only swap clips on change (compare to the currently-playing key) — don't
+  restart the loop every frame.
+- One `AudioSource` with `loop=true`, `spatialBlend=0` (2D — it's in the
+  player's own hands). Guard `Create()` with `if
+  (GameManager.IsDedicatedServer) return;`.
+- Ship the clips as raw 16-bit PCM `.wav` and decode at runtime (see section
+  above) so **no asset-bundle rebuild** is needed — adding a hum is just a
+  `.wav` under `resources/sounds/` + a map entry. Convert with
+  `ffmpeg -ar 44100 -ac 1 -c:a pcm_s16le`.
+- Caveat: a raw `AudioSource` isn't routed to 7DTD's SFX mixer group, so it
+  follows the global `AudioListener` volume but not the in-game "Sound" slider
+  specifically. Keep the volume subtle (~0.45).
+
+Reference: Quake Weapons mod `src/QuakeHum.cs` (`QuakeWeaponHum` + `WavLoader`),
+wired from `ModApi.InitMod` alongside the Harmony patches.
+
 ## How these were found
 
 Decompile `Assembly-CSharp.dll` with `ilspycmd` and grep for
