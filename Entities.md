@@ -158,6 +158,53 @@ Used by the FPV drone mod: when the drone feed activates it flips the operator
 to third person so the drone sees a complete body, and restores first person
 when control returns.
 
+### Attaching a worn prop to a character's head bone (third-person)
+
+To make a character *wear* something (goggles, a hat, a mask) that tracks head
+movement, parent your prop under the head bone of the entity's model:
+
+```csharp
+// EntityAlive.emodel is a public EModelBase; GetHeadTransform() is public and
+// returns the live head bone Transform of the CURRENT model.
+Transform head = entityAlive.emodel?.GetHeadTransform();
+if (head != null)
+{
+    var worn = Object.Instantiate(prefab);
+    worn.transform.SetParent(head, false);
+    worn.transform.localRotation = Quaternion.Euler(tunableEuler);
+    worn.transform.localScale = Vector3.one;
+    // NormalizeVisibleSize works off world renderer.bounds, so it corrects for
+    // the bone's own lossyScale; set localScale=1 first, then normalize.
+    worn.transform.localPosition = tunableLocalOffset;
+    SetLayerRecursive(worn, head.gameObject.layer); // match the body's model layer
+}
+```
+
+Gotchas learned wiring goggles onto the FPV operator:
+
+- **The head bone only exists on the third-person model.** In first person the
+  body is headless (see the gotcha above), so `GetHeadTransform()` is null/invalid
+  until you've switched to third person — and the switch rebuilds the model a frame
+  or two later. Don't attach once; re-check each frame and (re)attach when the
+  transform becomes available.
+- **A model rebuild destroys your prop.** Any `SetFirstPersonView` /
+  `SwitchModelAndView` (view toggle, HoldType refresh) rebuilds `emodel` and
+  destroys the old head bone — and your prop with it, since it's a child. Guard
+  with `if (prop == null)` (Unity's overload reports destroyed objects as null) and
+  respawn; also re-parent if `prop.transform.parent != currentHead`.
+- **Layer = visibility.** Set the prop to the head bone's GameObject layer (the
+  model layer, 24 — `SetModelLayer(24)` covers the whole bone hierarchy). That
+  guarantees any camera that already renders the body (e.g. a drone/render-texture
+  camera looking back at the operator) also renders the prop, with no culling-mask
+  change.
+- **The bone's local axes are rig-specific.** You can't predict the head bone's
+  forward/up headless, so expose the local offset/rotation/scale as live-tunable
+  knobs (the FPV mod drives them through its zPhone app + `fpv_settings.json`,
+  same pattern as the held-transmitter placement) rather than hardcoding a pose.
+
+`EModelBase` also exposes `GetModelTransform()` (model root) and
+`GetHeadPosition()` (world head position) as public methods.
+
 **Gotcha — restore order vs. `SetControllable`:** the player camera rig is bound
 to controllability. If you `SetControllable(false)` while taking over the screen,
 you must restore control **before** calling `SetFirstPersonView(true, …)`.

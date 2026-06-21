@@ -126,6 +126,22 @@ public override BlockActivationCommand[] GetBlockActivationCommands(...)
 
 **Constructor**: `BlockActivationCommand(commandName, iconName, enabled)`
 
+### When the wheel shows vs. instant action (IMPORTANT)
+`PlayerMoveController.Update` opens the radial on Activate **WasPressed** (first press, not a long hold) for any block whose `HasBlockActivationCommands(...)` returns true, then calls `XUiC_Radial.SetCurrentBlockData` → `SetCommonData`. That method counts only the **enabled** commands:
+- **0 or 1 enabled command** → it calls `CallContextAction()` immediately and never draws the wheel (the single command just fires — e.g. opens the options window). A block that always returns exactly one enabled command will *never* show a radial.
+- **2+ enabled commands** → the wheel is drawn; you keep Activate held, move to a slice, and release to pick.
+
+So the "hold E to see a wheel" UX is an emergent property of having ≥2 *enabled* commands — there is no separate hold gesture to implement. Toggle `enabled` per-command to switch a block between instant-action and wheel.
+
+### Vanilla turret behavior is free via `BlockRanged`
+`Class=Ranged` (`BlockRanged : BlockPowered`) already returns exactly two commands — `options`/`tool` and `take`/`hand` — with land-claim-aware enablement, and is what the SMG/auto turret uses:
+- `cmds[0] "options"` enabled when `_world.CanPlaceBlockAt(pos, localPlayer)` (true in your claim or unclaimed land).
+- `cmds[1] "take"` enabled when `_world.IsMyLandProtectedBlock(pos, localPlayer)` **and** `TakeDelay > 0f`.
+
+Net effect, no extra code: **inside your own land claim → 2 enabled → radial wheel (options + take); outside a claim → 1 enabled → options window opens instantly.** A mod block that just `extends BlockRanged` and delegates `GetBlockActivationCommands`/`OnBlockActivated` to `base` inherits this exactly (verified with RocketTurret). `TakeDelay` lives on `BlockPowered` (default `2f`, override via the `TakeDelay` block property), so "take" is enabled in-claim even if you never set it.
+
+Note: code/`.dll` changes are restart-kind — a deployed turret refactor only changes behavior after the client is fully restarted, not on `xui reload`.
+
 ### Icon resolution
 The game **prepends `ui_game_symbol_`** to the icon name. So `"hand"` resolves to `"ui_game_symbol_hand"` in the UIAtlas.
 
