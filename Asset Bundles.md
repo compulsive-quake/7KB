@@ -547,6 +547,20 @@ This is the deliberate, full-texture **inverse** of the placeholder-emission got
 
 Things that are NOT the cause (verified by cracking the bundle with `UnityPy`): texture pixel data (bundle mean RGB matched the source exactly), missing UVs, `m_ColorSpace` (albedo was `1`/sRGB, same as working mods), project color space (all these mods are Gamma `m_ActiveColorSpace: 0` and the world-entity ones render fine), shader stub (the bundled `Standard` had real compiled sub-programs), or material→texture wiring (all renderers resolved to textured mats). World-entity mods (vehicles/turrets/drones) don't show this because scene lighting on a world object is far less punishing than the first-person weapon-camera path on a held item.
 
+### Selective glow on a fullbright weapon — id's `<base>.glow` additive maps
+
+Quake view-model parts that glow (railgun coils/lens, etc.) come from a **separate `<base>.glow.<ext>` texture** sitting next to the diffuse (e.g. `railgun2.glow.jpg` beside `railgun2.tga`). It's a mostly-**black** additive map that's bright only where the part glows; id's weapon shader adds it on top of the lit diffuse. An MD3→OBJ converter **silently drops it**: the MD3 surface only stores *one* shader name (the base), nothing references the `.glow` sibling, and OBJ/MTL has no emission-map field Unity's importer reads. (Quake-Weapons, June 2026.)
+
+Three different naming conventions, only one is a safe additive overlay:
+- **`<base>.glow.<ext>`** (dot-glow) — the real additive glow companion. Add it. The *only* ones in the Q3 pak are `railgun2.glow` / `railgun3.glow`.
+- **`<weapon>_glo` / `<weapon>_e`** (e.g. `plasma_glo.tga`, `bfg_e.TGA`) — a standalone energy texture that a surface uses **directly as its base shader**. It already renders bright in the fullbright path; do NOT also match it as a `<base>_glo` companion or you'll paint energy over the body. (This is why the companion search keys on the dot-`.glow` suffix only.)
+- **`f_<weapon>`** (e.g. `f_machinegun.jpg`) — Quake Live "fullbright" skin: a *large bright* flare that assumes a dimly-lit base. On our already-fullbright emission base it blows the whole surface to white. Skip it.
+
+Pipeline used (extends the fullbright recipe above): `tools/md3_to_obj.py` looks up the `<base>.glow` sibling, copies it next to the OBJ, and writes a `glow.txt` manifest of `<mat_name>=<glow_file>` lines (one entry per energy surface; absent for the ~12 weapons with no glow). `SetupQuakeWeapons.cs` reads it and, for those materials, bakes **emission = clamp01(diffuse + glow)** into a single `_EmissionMap` (Standard has only one emission slot, so the two passes must be combined) and sets `_EmissionColor = white × ~2.2` so only the glow pixels read bright/bloom while the matte body (black in the glow map) stays calm. Gotchas:
+- The combined map must be saved as a **real `.png` asset** (`EncodeToPNG` → write → `ImportAsset` → load), exactly like the `.mat`-must-be-an-asset rule — an in-memory `new Texture2D` is lost when the bundle is built.
+- Source textures need `TextureImporter.isReadable = true` so `GetPixelBilinear` works; sample at the larger of the two resolutions and bilinear-resample the smaller (diffuse and glow are often different sizes).
+- A glow surface whose base texture is **absent from the pak** (railgun's coil — `railgun2.tga` doesn't exist, only its `.glow`) must stay base-less: skip the "grab any image in the folder" diffuse fallback when a glow map is present, or the combined emission picks up an unrelated body skin.
+
 ---
 
 ## Importing a `.gltf` / `.glb` model (UnityGLTF) and the magenta-in-game gotcha

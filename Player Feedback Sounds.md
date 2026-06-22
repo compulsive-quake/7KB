@@ -74,6 +74,19 @@ that don't need vanilla's sound categories/ducking.
 - `deploy.ps1` copies the whole `Resources/` tree, so a new subfolder ships
   automatically (it's an *assets* change, but if the same deploy also rebuilds
   the DLL it becomes a restart deploy).
+- **Build gotcha — reference `UnityEngine.AudioModule`:** `AudioClip` and
+  `AudioSource` are type-forwarded out of `UnityEngine.dll` into
+  `UnityEngine.AudioModule.dll`. A mod `.csproj` that references only
+  `UnityEngine` + `UnityEngine.CoreModule` fails to compile with **CS1069**
+  ("type 'AudioClip' has been forwarded to assembly 'UnityEngine.AudioModule'").
+  Add `<Reference Include="UnityEngine.AudioModule"><HintPath>$(ManagedDir)\
+  UnityEngine.AudioModule.dll</HintPath><Private>false</Private></Reference>`.
+  This failure mode is *silent in-game*: the `.wav` assets still deploy (assets
+  bucket) and a stale prior DLL stays in place, so the feature looks shipped but
+  the code that plays the audio never runs. Always confirm the DLL timestamp
+  advanced and the new class name is present in the built DLL after adding audio.
+  (Same trap applies to any UnityEngine type forwarded to a `*Module.dll` —
+  reference the specific module assembly.)
 
 **Thunder realism trick (speed-of-sound):** detect each clip's loud-onset
 ("clap") time at decode (peak pass, then first 50 ms RMS window ≥30 % of peak).
@@ -114,6 +127,71 @@ is held (firing), not at idle. To reproduce a Quake-style idle hum/whir
 
 Reference: Quake Weapons mod `src/QuakeHum.cs` (`QuakeWeaponHum` + `WavLoader`),
 wired from `ModApi.InitMod` alongside the Harmony patches.
+
+## Quake 3 weapon loop mapping — readySound vs firingSound (Quake Weapons mod)
+
+Quake 3 gives each weapon up to three looping/one-shot sounds in
+`cg_weapons.c` (`CG_RegisterWeapon`), and they are **not** named the way you'd
+guess from the filename:
+
+- `readySound` — loops the whole time the weapon is **equipped but not firing**.
+- `firingSound` — loops only **while the trigger is held** (replaces readySound
+  via `if ( (eFlags & EF_FIRING) && firingSound ) … else if ( readySound ) …`).
+- `flashSound[0]` — the per-shot muzzle one-shot.
+
+The trap: the lightning gun's idle hum is **`sound/weapons/melee/fsthum.wav`**
+— the *same clip as the gauntlet's* readySound — while
+`sound/weapons/lightning/lg_hum.wav` is its **firingSound** (the electric
+crackle), *not* the equipped hum. Quake Weapons' `QuakeHum.cs` plays while the
+weapon is **selected**, so it mirrors `readySound`: map `quakeLightningGun` to
+fsthum, not lg_hum. (Originally shipped lg_hum as the idle hum, which sounded
+wrong — it's the beam loop.) `tools/convert_sounds.ps1` `$hums` now sources
+fsthum for both gauntlet and lightning, so the two idle wavs are byte-identical.
+
+`QuakeHum.cs` owns the LG's **entire** fire audio (strike + loop), not just the
+idle hum. Three runtime clips, all decoded from raw PCM under resources/sounds/:
+`ReadyHums` (fsthum, while selected & idle), `FiringLoops` (lg_hum, the sustained
+beam crackle while held), `FireStarts` (lg_fire, a one-shot on the not-firing →
+firing edge). On the firing edge it `PlayOneShot`s the strike on a second
+AudioSource and swaps the sustained source fsthum→lg_hum; on release it swaps
+back. Swap the sustained loop, don't layer — Quake's ready/firing are mutually
+exclusive. lg_hum ships as `lightninggun_beam.wav`, lg_fire as
+`lightninggun_strike.wav` (convert_sounds.ps1 `$firingLoops` / `$fireStarts`).
+
+**Detect "trigger held" via `bPressed`, NOT a fire-time window.** First attempt
+inferred firing from "a round fired within FiringHangtime (0.12 s)". That breaks
+on a *discrete-round* weapon whose round interval exceeds the window: between
+rounds the state falls back to "not firing", so the strike re-fires and the loop
+restarts every shot — a stuttering, delayed mess (the LG is built on the SMG, so
+it's discrete rounds under the hood, not a true held beam). The robust signal is
+the live trigger flag: `player.inventory.holdingItemData.actionData[0]` cast to
+`ItemActionRanged.ItemActionDataRanged`, then `.bPressed` — set true on fire-start
+and false only on trigger release, so it stays true for the whole hold regardless
+of per-round cadence. Note the data type is **nested** (`ItemActionRanged.`-
+prefixed) and `actionData[0]` is the base `ItemActionData`, so an `as` cast is
+required. This replaced the Harmony `fireShot` postfix entirely — no patch needed
+for firing state, just read the held item's action data each `Update()`.
+
+**Why C# owns it — the 7DTD firing-sound trap.** Decompiling
+`ItemActionRanged.Fire` (called once per round): when `itemValue.Meta == 0`
+(true for these guns) and the weapon is firing, it does
+`Manager.Play(holdingEntity, SoundStart)` **every round** (plus a
+`(_firingState==1) ? SoundStart : SoundLoop` per-round play). So `Sound_start`
+itself replays per round — for a 1200 RPM gun the 2.77 s `lg_fire` stacks into a
+continuous "strike wall" (SoundDataNode allowed `MaxVoices=30`,
+`MaxRepeatRate=0.001`). There is **no XML way** to make it play once: removing
+`Sound_loop` doesn't help (it just inherits the parent SMG's `smg_fire`, and the
+per-round `Sound_start` replay remains). Fix used: **blank both** in the LG's
+`Action0` (`value=""` — vanilla's own idiom for killing inherited sounds, e.g.
+`Sound_reload`/`Sound_end value=""` on stock guns) so vanilla plays nothing, and
+let QuakeHum.cs play lg_fire once + loop lg_hum. Side effect: a blanked weapon
+sound emits **no AI noise** (the SoundDataNode's `<Noise>` never triggers) — the
+LG is silent to zombies unless you re-add a noise source. Leave the machineguns'
+`Sound_loop` alone — per-round retrigger is correct for discrete-shot full-auto;
+only continuous-beam weapons need this C#-owned once-then-loop shape.
+
+Reference: `code/cgame/cg_weapons.c` in id-Software/Quake-III-Arena (GitHub);
+`ItemActionRanged.Fire` in 7DTD `Assembly-CSharp.dll`.
 
 ## How these were found
 
