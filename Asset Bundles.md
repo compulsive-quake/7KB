@@ -563,6 +563,52 @@ Pipeline used (extends the fullbright recipe above): `tools/md3_to_obj.py` looks
 
 ---
 
+## Animating a baked emission map at runtime (recreate Quake `tcMod scroll`)
+
+Quake 3 weapon energy (railgun coil, plasma/BFG glow) is an **animated** shader —
+`tcMod scroll` streams the energy texture along the surface. The Standard shader
+the bundle bakes to has **no UV animation**, so a baked `_EmissionMap` energy
+stripe renders as a static painted-on band. You don't need a custom shader (those
+get stripped → magenta) or a bundle rebuild to animate it: **scroll the material's
+`_EmissionMap` texture offset every frame from a runtime MonoBehaviour**, exactly
+like the held-item drivers (hum/beam/placement).
+
+Recipe (Quake-Weapons `src/QuakeGlow.cs`, June 2026):
+- Resolve the locally-held model the standard way — `world.GetPrimaryPlayer()` →
+  `inventory.holdingItem` (name gate) → `inventory.GetHoldingItemTransform()`.
+- Read `renderer.materials` (NOT `sharedMaterials`) so Unity instantiates
+  per-renderer copies — the scroll then stays local and never mutates the shared
+  bundle material asset. The instances die with the model, so the offset resets
+  for free whenever the game re-clones the held item (view switch / hold-type
+  change — see Items.md). If a renderer carries no energy surface, set
+  `r.materials = r.sharedMaterials` back so you don't leak useless copies.
+- **Identify the surface by a substring of its `_EmissionMap` texture name** —
+  the bake preserves it (the diffuse texture name for a fullbright surface, e.g.
+  `railgun4`; `<mat>_emis` for a baked combined diffuse+glow energy map). "Has an
+  emission map" is NOT a discriminator (the fullbright trick gives *every* surface
+  one) — match the specific name.
+- **The animated surface is often a plain fullbright diffuse, NOT a baked glow
+  map.** Quake-Weapons' first cut only scrolled the `_emis` coil/lens maps and the
+  player saw no change — the band they meant (the railgun's top energy strip,
+  `railgun4.jpg`) is a neutral-grey diffuse that Q3's *weapon shader* both
+  **green-tinted** (`rgbGen`) and scrolled. The static bake kept it grey and
+  still, so it read as a dead "white area on top." Recreating it needs BOTH:
+  force `_EmissionColor` to the energy colour (HDR >1 on the dominant channel so
+  it blooms) AND scroll the UVs. A scroll alone on an untinted/uniform region is
+  invisible — a solid colour looks identical at any UV offset.
+- Scroll with `m.SetTextureOffset("_EmissionMap", new Vector2(Mathf.Repeat(Time.time*sx,1f), Mathf.Repeat(Time.time*sy,1f)))`.
+  Wrapping with `Mathf.Repeat(...,1f)` tiles seamlessly **only if the emission
+  texture imports with Repeat wrap mode** (Unity default — don't set Clamp).
+- Pick the scroll axis to match the coil's UV layout (railgun rings run along the
+  barrel → scroll V). Caveat: a base+glow surface (railgun *lens*) scrolls its
+  whole combined map too; if that looks wrong, name-match just the glow-only coil
+  material rather than all `_emis` surfaces.
+
+This is the runtime-animation complement to the static emission baking above:
+bake the look in the bundle, animate the cheap part (a single UV offset) in C#.
+
+---
+
 ## Importing a `.gltf` / `.glb` model (UnityGLTF) and the magenta-in-game gotcha
 
 7DTD model bundles are usually FBX, but glTF/GLB (e.g. Blockbench or Sketchfab
@@ -677,9 +723,17 @@ props.Values["Explosion.BlastPower"]       = "0";
 props.Values["Explosion.DamageBonus.water"]= "0";
 var data = new ExplosionData(props, null);
 if (data.BuffActions == null) data.BuffActions = new List<string>();
-GameManager.Instance.ExplosionServer(0, worldPos, World.worldToBlockPos(worldPos),
+GameManager.Instance.ExplosionServer(worldPos, World.worldToBlockPos(worldPos),
     Quaternion.identity, data, ownerEntityId, 0f, false, sourceItemValue);
 ```
+
+> **API note (verified against installed Assembly-CSharp.dll, 2026-06):** current
+> signature is `ExplosionServer(Vector3 _worldPos, Vector3i _blockPos, Quaternion
+> _rotation, ExplosionData _explosionData, int _entityId, float _delay, bool
+> _bRemoveBlockAtExplPosition, ItemValue _itemValueExplosionSource = null)` — **8
+> args, no leading `clrIdx`**. A newer game build dropped the old leading `int
+> clrIdx` from the whole explosion API family (`ExplosionServer` *and*
+> `ExplosionClient`). Passing 9 args → `CS1501: No overload ... takes 9 arguments`.
 
 `ExplosionServer` handles entity damage, VFX (`ParticleIndex`), explosion sound,
 owner attribution (kills credit the player), and MP networking. With
