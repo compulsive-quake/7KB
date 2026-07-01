@@ -7,6 +7,7 @@ Shared knowledgebase for 7DTD mod development. Used by multiple projects (7nes, 
 - [Mod Structure](Mod%20Structure.md) — Folder layout, ModInfo.xml, DLL loading, modlet system
 - [XML Patching (XPath)](XML%20Patching%20(XPath).md) — How to patch vanilla XML configs; sounds system
 - [Harmony Patching](Harmony%20Patching.md) — Harmony prefix/postfix patterns, common targets, reflection
+- [7DTD 3.0.0 API Changes](7DTD%203.0.0%20API%20Changes.md) — Breaking 2.x→3.0.0 changes: **XUi folder split (`Config/XUi/` → `Config/XUi_InGame/` or mod UI silently doesn't load → `Window unknown!`)**, `<ruleset>` wrapper removed from `xui.xml`, `World` `clrIdx` param removal (`GetTileEntity`/`SetBlockRPC` now take `BlockValueRef`), `ChunkClusters`→`ChunkCache`, `RefreshBindings()` arg drop, `GUIWindowManager.Open` overloads; recompile to surface the C# breaks as compile errors
 - [Localization](Localization.md) — Adding translated text keys
 - [Blocks](Blocks.md) — Custom block classes, XPath patches, block properties
 - [Workstations](Workstations.md) — Workstation blocks, modules, tool slots, XUi window groups
@@ -17,6 +18,7 @@ Shared knowledgebase for 7DTD mod development. Used by multiple projects (7nes, 
 - [Networking - Connecting and Chat](Networking%20-%20Connecting%20and%20Chat.md) — ConnectionManager, sending chat via NetPackageChat, JSON escape gotcha in 7debug's /api/command
 - [Asset Bundles](Asset%20Bundles.md) — Loading custom models, particles, sounds from .unity3d bundles
 - [Runtime Procedural VFX](Runtime%20Procedural%20VFX.md) — Runtime LineRenderer/particle effects with no bundle; the `HideAndDontSave` texture/material gotcha, procedural lightning, world→scene space
+- [Runtime Explosions (ExplosionData)](Runtime%20Explosions%20(ExplosionData).md) — `GameManager.ExplosionServer` code-driven blasts; the 3.0.0 silent-no-op gotcha (`ExplosionData` reads nested `Classes["Explosion"]` keys, not flat `Explosion.*`) and the `ExplosionServer` `clrIdx` param removal
 - [Player Feedback Sounds](Player%20Feedback%20Sounds.md) — Stock UI "denied" buzzers (e.g. `missingitemtorepair`) and how to play them via `Audio.Manager.PlayInsidePlayerHead`
 - [Camera View Switching (First/Third Person)](Camera%20View%20Switching%20(First-Third%20Person).md) — `SetFirstPersonView`/`SetCameraAttachedToPlayer` internals; `playerCamera.transform` IS `cameraTransform`; the cross-mod bug where a temporary view switch leaves the camera + held-item transforms parked and breaks other mods' laser/aim (cone beam, targets own head), and the multi-frame re-assert fix
 - [Paint & Textures](Paint%20%26%20Textures.md) — Block paint texture IDs and the paint system

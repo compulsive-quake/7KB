@@ -23,11 +23,15 @@ addressables `Prefabs/prefabExplosion{i}.prefab` (i = 0..99). An item's
 The cleanest "pure visual, no block damage" explosion is the game's own
 client-side FX call — literally the path a thrown grenade runs for its visuals:
 ```csharp
-// _clrIdx is never read inside ExplosionClient, so 0 is fine.
+// Current sig (verified against installed Assembly-CSharp.dll, 2026-06) — NO
+// leading clrIdx anymore; a newer build dropped it from the whole explosion API:
+//   ExplosionClient(Vector3 _center, Quaternion _rotation, int _index,
+//       int _blastPower, float _blastRadius, float _blockDamage, int _entityId,
+//       List<BlockChangeInfo> _explosionChanges)
 // It subtracts Origin.position itself — pass the FULL world pos.
 // Empty change list => no block edits; 0 blastPower/radius => no knockback.
 static readonly List<BlockChangeInfo> NoChanges = new List<BlockChangeInfo>();
-GameManager.Instance.ExplosionClient(0, worldPos, Quaternion.identity,
+GameManager.Instance.ExplosionClient(worldPos, Quaternion.identity,
     index, 0, 0f, 0f, entityId, NoChanges);
 ```
 `ExplosionClient` only edits blocks when handed a **non-empty** change list, so

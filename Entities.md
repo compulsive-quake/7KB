@@ -124,6 +124,36 @@ To change a property on an existing entity:
 
 ---
 
+## Damage / XP / Ragdoll C# API — signatures changed in 3.0.0
+
+The 3.0 update changed several entity-combat method signatures. Code built
+against 2.x still *loads* but throws `MissingMethodException` at the call site
+the first time the containing method JITs — and because the exception aborts the
+whole method, **no damage and no knockback are applied** (symptom: a mod that
+"stopped hurting / ragdolling zombies" after updating). Rebuild against the live
+3.0 `Assembly-CSharp.dll` and fix the calls:
+
+| Method | 3.0.0 signature | Note |
+|---|---|---|
+| `EntityPlayer.AddKillXP` | `(EntityAlive killedEntity, ItemValue itemUsed, float xpModifier = 1f)` | Gained a required `ItemValue itemUsed` arg (was `(EntityAlive, float=1f)` in 2.x). Pass the attacking weapon's `ItemValue`. |
+| `EModelBase.DoRagdoll` | `(RagdollMode _mode, float stunTime, EnumBodyPartHit bodyPart, Vector3 forceVec, Vector3 forceWorldPos, bool isRemote)` | Gained a leading `RagdollMode _mode` arg. `RagdollMode` is a **nested** enum in `EModelBase` (`Default`, `FullForce`) — reference it as `EModelBase.RagdollMode.Default`. |
+| `EntityAlive.DamageEntity` | `(DamageSource, int strength, bool crit, float impulseScale = 1f)` | Unchanged through 3.0 (impulse arg optional). |
+| `DamageSourceEntity` 7-arg ctor | `(EnumDamageSource, EnumDamageTypes, int id, Vector3 dir, string hitTransformName, Vector3 hitTransformPos, Vector2 uvHit)` | Unchanged. |
+
+`DoRagdoll` still routes through `SetRagdollVelocity` (launches every ragdoll
+bone's `Rigidbody.velocity` in m/s, clamping `y >= -10`) when `bodyPart ==
+EnumBodyPartHit.None`; the new `_mode` only affects the network packet, so
+`RagdollMode.Default` preserves the old behavior. (Airstrike 3.0.0 break, fixed
+by adding the new args.)
+
+**Verifying a signature fast:** `ilspycmd` (a dotnet global tool) decompiles the
+live assembly without launching the game:
+`ilspycmd -t EntityPlayer "<GameDir>\7DaysToDie_Data\Managed\Assembly-CSharp.dll"`.
+PowerShell 7's `ReflectionOnlyLoadFrom`/`MetadataLoadContext` are unavailable, so
+prefer `ilspycmd`.
+
+---
+
 ## Local Player Camera View (first ↔ third person, C#)
 
 `EntityPlayerLocal` controls which view the local player is in. Useful when a
