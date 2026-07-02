@@ -20,8 +20,10 @@ Shared knowledgebase for 7DTD mod development. Used by multiple projects (7nes, 
 - [Runtime Procedural VFX](Runtime%20Procedural%20VFX.md) — Runtime LineRenderer/particle effects with no bundle; the `HideAndDontSave` texture/material gotcha, procedural lightning, world→scene space
 - [Runtime Explosions (ExplosionData)](Runtime%20Explosions%20(ExplosionData).md) — `GameManager.ExplosionServer` code-driven blasts; the 3.0.0 silent-no-op gotcha (`ExplosionData` reads nested `Classes["Explosion"]` keys, not flat `Explosion.*`) and the `ExplosionServer` `clrIdx` param removal
 - [Player Feedback Sounds](Player%20Feedback%20Sounds.md) — Stock UI "denied" buzzers (e.g. `missingitemtorepair`) and how to play them via `Audio.Manager.PlayInsidePlayerHead`
+- [Runtime WAV Loading (AudioClip from disk)](Runtime%20WAV%20Loading%20(AudioClip%20from%20disk).md) — Ship a loose `.wav` in `Resources/` and decode it into an `AudioClip` at runtime (RIFF chunk-walk + PCM→float + `AudioClip.Create`/`SetData`) with no asset-bundle rebuild; see `FPV/src/FPVWavLoader.cs`
 - [Camera View Switching (First/Third Person)](Camera%20View%20Switching%20(First-Third%20Person).md) — `SetFirstPersonView`/`SetCameraAttachedToPlayer` internals; `playerCamera.transform` IS `cameraTransform`; the cross-mod bug where a temporary view switch leaves the camera + held-item transforms parked and breaks other mods' laser/aim (cone beam, targets own head), and the multi-frame re-assert fix
 - [Paint & Textures](Paint%20%26%20Textures.md) — Block paint texture IDs and the paint system
+- [Reading HID Joysticks (winmm)](Reading%20HID%20Joysticks%20(winmm).md) — P/Invoke `winmm.dll` to read HID joysticks/RC transmitters (legacy Input Manager can't); the `szPname` "Microsoft PC-joystick driver" gotcha and the registry OEM-name lookup for the real device name
 
 ## XUi (UI System)
 

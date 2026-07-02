@@ -868,3 +868,25 @@ No XUi XML registration needed — no `windows.xml`, no `xui.xml`, no window gro
 > Key points: the label `width` must equal the rect `width` for `justify="center"` to center properly. If the label has a left-offset `pos` (e.g. `pos="10,0"`) or a narrower `width` than its parent, the text will appear off-center. Do NOT use `<button>` for styled buttons — it renders a white background that ignores the `color` attribute.
 
 > **Changing an XUi controller class to a non-XUiController (e.g. MonoBehaviour) causes `InvalidCastException` in `XUiFromXml.LoadXui`.** If a class name previously used as a `controller=""` attribute still exists in the DLL but no longer extends `XUiController`, the XUi loader may find it by name, try to cast it, and crash — even if no XML references it anymore. Rename the class to avoid conflicts.
+
+# Native Radial Wheel from C# (`XUiC_Radial`)
+
+The vanilla radial wheel can be repurposed from mod code with custom entries — no XUi XML needed (learned in the FPV mod's pre-flight menu, 2026-07):
+
+```csharp
+XUiC_Radial radial = ui.xui.RadialWindow;           // LocalPlayerUI.GetUIForPrimaryPlayer()
+radial.Open();                                       // match vanilla order: Open() BEFORE populating
+radial.ResetRadialEntries();
+radial.CreateRadialEntry(cmdIndex, "sprite_name", "ItemIconAtlas", "", "Label text");
+radial.SetCommonData(UIUtils.ButtonIcon.RightStick, OnRadialCommand);
+// handler: void OnRadialCommand(XUiC_Radial r, int commandIndex, XUiC_Radial.RadialContextAbs ctx)
+```
+
+- The wheel manages its own lifecycle when opened from a held key (e.g. Reload/R):
+  stays open while the key is held, fires the handler for the highlighted entry on release.
+- Entry count is flexible (2, 4, 8… all lay out fine).
+- **Custom icons**: drop PNGs in `UIAtlases/ItemIconAtlas/` and reference them by filename
+  (no extension) with atlas `"ItemIconAtlas"`. They do NOT have to be item icons — arbitrary
+  UI glyphs work. 128×128 white-on-transparent reads well on the wheel. Vanilla sprites work
+  too via atlas `"UIAtlas"` (e.g. `ui_game_symbol_drone`).
+- New atlas PNGs are baked at load — adding one needs a restart (atlas rebuild), not just xui reload.
