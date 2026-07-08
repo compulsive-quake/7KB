@@ -209,6 +209,21 @@ Any alignment or tuning panel that exposes a numeric value (scale, rotation, off
 
 Layout per row: `<<` (hold-rewind) / `-` / **editable text field** / `+` / `>>` (hold-ffwd). The text field absorbs whatever width is left after the four 30-px buttons.
 
+For a slider row where the readout doubles as the text field (click the number,
+type, Enter/click-away commits, Esc cancels), see
+`FPV/src/FPVOptionsDialog.cs::NumberField`. Its gotchas:
+
+- Keep an **edit buffer** (`_editField` name + `_editText`) while the field is
+  focused and only reformat when unfocused — otherwise `v.ToString(fmt)` every
+  frame fights the user (can't type an intermediate `"1."`).
+- IMGUI buttons/custom sliders are focus-passive, so clicking them never blurs
+  a text field. Blur explicitly: on any `MouseDown` at the top of the draw, set
+  `GUIUtility.keyboardControl = 0` — a click ON a field refocuses it in the same
+  event, a click elsewhere leaves it blurred and the field commits on focus loss.
+- If the panel closes on Esc, check "is a field being edited?" first and make
+  Esc cancel the edit instead of closing.
+- Don't snap typed values to the slider's step increment — quantize only drags.
+
 ```csharp
 // One tunable row. Returns next Y.
 float DrawRow(float px, float y, float panelW, string label, string fmt,
@@ -300,6 +315,81 @@ private void TryOpenPhone()
 ```
 
 If you add a new interactive IMGUI tool, give it an `IsOpen` accessor and add it to every existing input listener's gate list. Reference: `zPhone/src/ZPhoneKeyListener.cs::TryOpenPhone`.
+
+### Scale fixed-pixel panels to the resolution (GUI.matrix against a 1080 reference)
+
+IMGUI lays out in **raw pixels**, so a panel authored with hardcoded sizes (window `760×600`, `fontSize 14`, `GUILayout.Width(100)`, etc.) renders the same pixel count on every display — which means it looks correctly sized at 1080p but shrinks and gets hard to read at 1440p/4K. Don't hand-scale each width/font; wrap the whole draw in a `GUI.matrix` scale keyed to a 1080p reference (the same `HudReferenceHeight = 1080f` convention the HUD uses), and lay everything out in reference pixels:
+
+```csharp
+float scale = Screen.height / 1080f;          // 1.0 @1080p, 1.333 @1440p, 2.0 @4K
+Matrix4x4 prev = GUI.matrix;
+GUI.matrix = Matrix4x4.Scale(new Vector3(scale, scale, 1f));
+
+float vw = Screen.width / scale, vh = 1080f;   // screen size in reference px
+// ... lay out the panel centered in (vw × vh), full-screen dim over (0,0,vw,vh) ...
+
+GUI.matrix = prev;                             // restore so scale doesn't leak
+```
+
+- At 1080p `scale == 1`, so the layout is byte-for-byte unchanged — safe to retrofit onto a panel that already "looks good at 1080p".
+- The matrix applies to **event coordinates too**, so `GUILayout.Button`/`Toggle` hit-testing stays correct; no manual mouse-coord fixups. (Manual `Input.mousePosition` hit-tests would need dividing by `scale`.)
+- Always restore `GUI.matrix` at the end of the draw, or the scale bleeds into any other `OnGUI` drawn afterward.
+- Text is bitmap-scaled by the matrix, so it's slightly soft at large factors (2×) — fine for a settings/tool panel; if you need crisp glyphs, scale `fontSize` by `scale` instead and skip the matrix (but then every `Width`/`Rect` needs `* scale` too).
+
+Reference: `FPV/src/FPVOptionsDialog.cs::Draw`.
+
+### Shrunk in-panel preview of a full-screen HUD (don't nest GUI.matrix in a layout area)
+
+To show a live miniature of a full-screen IMGUI HUD inside a settings panel (e.g. per-element
+visibility toggles next to a preview), do **not** try to compose a second `GUI.matrix`
+scale inside a `GUILayout.BeginArea`/`BeginScrollView` — the clip stack's offsets were
+computed under the outer matrix, and changing the matrix mid-area scales those offsets
+too, landing the preview in the wrong place.
+
+Instead, factor the HUD's element drawing into a shared static renderer that draws in the
+HUD's reference canvas (1920×1080) and routes every rect through an explicit
+origin+scale transform (identity for the live feed path):
+
+```csharp
+static float _ox, _oy, _scale = 1f;
+static Rect R(float x, float y, float w, float h)
+{
+    if (_scale == 1f) return new Rect(x, y, w, h);
+    return new Rect(_ox + x * _scale, _oy + y * _scale,
+        Mathf.Max(1f, w * _scale), Mathf.Max(1f, h * _scale));  // 1px floor: see below
+}
+```
+
+- The **1px floor** on scaled sizes matters: a 2px HUD stroke at preview scale (~0.3×)
+  is 0.6px and vanishes/dashes without it.
+- Scale `fontSize` by the same factor (floor ~6px) when building the preview's styles;
+  the live path keeps full-size fonts.
+- The settings dialog gets the preview rect from `GUILayoutUtility.GetRect(w, h)` and
+  passes `rect.x, rect.y, rect.height / 1080f` as the transform — works inside scroll
+  views because everything stays in plain layout coordinates.
+- Sharing one renderer between feed and preview (live values vs. a fixed sample struct)
+  keeps the preview from drifting when the HUD layout changes.
+
+Reference: `FPV/src/FPVHudRenderer.cs` (`DrawScaled`) + `FPV/src/FPVOptionsDialog.cs::DrawHudTab`.
+
+### Don't rely on the game skin's default control styles (tiny fonts, invisible sliders)
+
+7DTD's `GUI.skin` renders IMGUI defaults *small*: ~11-12 px label/button text, and
+`GUILayout.HorizontalSlider` draws as a hairline track with a barely-visible thumb —
+users can't even tell it's a slider. For any user-facing panel:
+
+- Build explicit `GUIStyle`s once (`new GUIStyle(GUI.skin.button) { fontSize = 16, padding = ... }`)
+  and pass them to **every** `Button`/`Toggle`/`Label` call; don't mutate `GUI.skin` in place
+  (it's shared with the rest of the game's IMGUI).
+- Give row labels a `fixedHeight` matching the button height + `TextAnchor.MiddleLeft`
+  so text centres against taller buttons instead of riding the row top.
+- Replace `HorizontalSlider` with a custom-drawn slider: `GUILayoutUtility.GetRect` +
+  `GUIUtility.GetControlID(hash, FocusType.Passive, rect)` + `hotControl` mouse handling
+  (MouseDown in rect → grab, MouseDrag while hot → set value from mouse X, MouseUp → release,
+  draw track/fill/thumb on `EventType.Repaint` only). Flank it with `−`/`+` step buttons for
+  precision. Reference: `FPV/src/FPVOptionsDialog.cs::FancySlider` / `SteppedSlider`.
+- Unicode glyphs proven to render in the game font (used in FPV): `▶ − + × …`. Fancier
+  glyphs (⚙ ↺ ⌨) are unverified and may render as boxes — test before shipping.
 
 ### Other interactive-IMGUI gotchas
 

@@ -1,37 +1,59 @@
-# Reading HID Joysticks (winmm)
+# Reading HID Joysticks (hid.dll; formerly winmm)
 
 7DTD uses Unity's **legacy** Input Manager, so `Input.GetAxis` only sees axes
 baked into the shipped `InputManager.asset` — a mod cannot add axes. To read a
 DirectInput/HID joystick (e.g. a RadioMaster transmitter in "USB Joystick
-(HID)" mode), bypass Unity and P/Invoke the Win32 multimedia joystick API in
-`winmm.dll`: `joyGetNumDevs` / `joyGetPosEx` / `joyGetDevCapsW`. This exposes
-up to 6 analog axes (X,Y,Z,R,U,V), 32 buttons, and a POV hat. Channel order
-varies per radio/firmware, so bind axes by detection ("move the stick"), not a
-fixed mapping. Working implementation: `FPV/src/FPVGamepad.cs`.
+(HID)" mode), bypass Unity and read the device directly. Working
+implementation: `FPV/src/FPVGamepad.cs` (direct hid.dll, all 8 axes).
 
-## Gotcha: device name
+## Current approach: setupapi + hid.dll + overlapped ReadFile
 
-`JOYCAPS.szPname` is the **driver** string — for any generic HID device it
-reads "Microsoft PC-joystick driver", not the product name the Windows Game
-Controllers dialog shows. The friendly name lives in the registry:
+Parse HID input reports yourself; winmm is a 6-axis dead end (see below).
+Recipe, all plain P/Invoke with no extra DLLs shipped:
 
-1. `HK{CU,LM}\System\CurrentControlSet\Control\MediaResources\Joystick\<szRegKey>\CurrentJoystickSettings`,
-   value `Joystick<id+1>OEMName` → an OEM subkey name like `VID_1209&PID_4F54`.
-2. `HK{CU,LM}\System\CurrentControlSet\Control\MediaProperties\PrivateProperties\Joystick\OEM\<that>\OEMName`
-   → the friendly name (e.g. "Radiomaster Pocket Joystick").
+1. **Enumerate**: `HidD_GetHidGuid` → `SetupDiGetClassDevs(DIGCF_PRESENT |
+   DIGCF_DEVICEINTERFACE)` → `SetupDiEnumDeviceInterfaces` →
+   `SetupDiGetDeviceInterfaceDetail` for the device path. The detail struct's
+   `cbSize` is the *fixed* part only: **8 on x64** (the game is 64-bit only).
+2. **Filter**: `CreateFile(GENERIC_READ, share RW, FILE_FLAG_OVERLAPPED)` —
+   keyboards/mice refuse GENERIC_READ, which filters them for free. Then
+   `HidD_GetPreparsedData` + `HidP_GetCaps`; keep devices with
+   `UsagePage 0x01` and `Usage` 0x04 (joystick) / 0x05 (gamepad) / 0x08
+   (multi-axis). If several qualify, prefer the one with the most axes.
+3. **Friendly name**: `HidD_GetProductString` returns the same name the Game
+   Controllers dialog shows — this **replaces** the winmm-era registry
+   OEMName crawl entirely.
+4. **Axes**: `HidP_GetValueCaps` (mind `IsRange`) → the 8 analog usages are
+   `0x30..0x37` = X, Y, Z, Rx, Ry, Rz, Slider, Dial. Record
+   `LogicalMin/Max/BitSize` per usage; if `LogicalMin < 0` the raw value from
+   `HidP_GetUsageValue` is two's-complement in `BitSize` bits — sign-extend
+   before normalizing.
+5. **Read loop** (no background thread needed): keep one overlapped `ReadFile`
+   pending; each frame drain completed reports via
+   `GetOverlappedResult(wait:false)` until `ERROR_IO_INCOMPLETE`, re-issuing
+   the read after each report. Allocate the OVERLAPPED and report buffer in
+   unmanaged memory (`Marshal.AllocHGlobal`); on x64 `hEvent` sits at
+   OVERLAPPED offset 24. Any other read error = device unplugged.
+6. **Parse**: `HidP_GetUsageValue` per axis usage and `HidP_GetUsages`
+   (usage page 0x09; button usages are 1-based) per report.
+   `HIDP_STATUS_SUCCESS` is `0x00110000`; a non-success status usually means
+   the usage lives in a different report ID — keep the previous value, don't
+   zero it. Report buffer length passed to `HidP_*` is
+   `Caps.InputReportByteLength` (includes the report-ID byte).
+7. **Teardown**: if a read is pending, `CancelIo` + `GetOverlappedResult(wait:
+   true)` *before* freeing the buffers, or the driver can write into freed
+   memory.
 
-If step 1 yields nothing, build the subkey directly from `JOYCAPS.wMid`/`wPid`
-as `VID_{mid:X4}&PID_{pid:X4}`. Check **HKCU first, then HKLM** — DirectInput
-writes OEM keys per-user on non-admin installs. Some entries have an empty
-`OEMName` value, so fall back to `szPname` when the lookup comes up blank.
-This is the same lookup GLFW/SDL use; see `ResolveDeviceName` in
-`FPV/src/FPVGamepad.cs`.
+Channel order still varies per radio/firmware, so bind axes by detection
+("move the stick"), not a fixed mapping. Slots the device doesn't report
+should read as centered (0.5) so a stale bind can't peg a channel.
 
-## Gotcha: winmm cannot see HID Ry ("Y Rotation") or the 8th axis
+## Why not winmm (`joyGetPosEx`): it silently drops 2 of 8 axes
 
-`joyGetPosEx` exposes only 6 of the 8 HID analog axes, and the mapping is not
-what the field names suggest. Per the EdgeTX manual (USB joystick "classic"
-mode, CH1-8 → HID X, Y, Z, Rx, Ry, Rz, Slider, Dial):
+winmm (`joyGetNumDevs` / `joyGetPosEx` / `joyGetDevCapsW`) has only six axis
+slots and the HID→slot mapping is not what the field names suggest. Measured
+with EdgeTX USB joystick "classic" mode (CH1-8 → HID X, Y, Z, Rx, Ry, Rz,
+Slider, Dial):
 
 | EdgeTX channel | HID axis | JOYINFOEX field |
 |---|---|---|
@@ -45,21 +67,27 @@ mode, CH1-8 → HID X, Y, Z, Rx, Ry, Rz, Slider, Dial):
 | CH8 | Dial | **not visible** |
 | CH9-32 | buttons | dwButtons |
 
-So a switch mixed onto CH5 (or CH8) shows up and moves in the Windows Game
-Controllers dialog (DirectInput sees all axes) but is **invisible** to winmm —
-no movement in any of the 6 polled axes, no bind capture. Fixes, radio side:
-move the mix to CH6/CH7, or better to **CH9+** where it reports as a plain HID
-*button*; EdgeTX's USB joystick "Advanced" mode can also set a channel's mode
-to `Btn` explicitly. Code side, the only real fix is Raw Input / hid.dll
-instead of winmm. Source:
+So a switch mixed onto CH5 (or CH8) moves in the Windows Game Controllers
+dialog (DirectInput sees all axes) but is **invisible** to winmm — no
+movement in any polled axis, no bind capture. This bit the FPV mod for real;
+the direct-HID rewrite above was the fix. Radio-side workarounds (if stuck
+with winmm): move the mix to CH6/CH7, or to **CH9+** where it reports as a
+plain HID *button*; EdgeTX's USB joystick "Advanced" mode can also set a
+channel's mode to `Btn` explicitly. Source:
 <https://manual.edgetx.org/edgetx-how-to/joystick-mapping-information-for-game-developers>
+
+Also, `JOYCAPS.szPname` is the **driver** string ("Microsoft PC-joystick
+driver"), not the product name; getting the real name under winmm requires a
+registry crawl through `MediaResources\Joystick\<szRegKey>` →
+`MediaProperties\...\Joystick\OEM\<VID_xxxx&PID_xxxx>\OEMName` (HKCU first,
+then HKLM). With hid.dll, `HidD_GetProductString` makes all of that obsolete.
 
 ## Gotcha: transmitter switches can report as axes, not buttons
 
 Depending on the radio's channel/mixer setup, a 2/3-position aux switch may be
-mapped onto one of the 6 analog axes instead of a button bit — a press-to-bind
-button capture will never see it. Treat "axis as switch": at bind time record
-the axis index plus its **rest position** (normalized 0..1 value when capture
+mapped onto an analog axis instead of a button bit — a press-to-bind button
+capture will never see it. Treat "axis as switch": at bind time record the
+axis index plus its **rest position** (normalized 0..1 value when capture
 started), then consider the action held while `|value - rest| > 0.25`. The
 rest-relative delta self-calibrates regardless of which way the switch throws
 or whether it idles at 0, 0.5, or 1. Exclude axes already bound to flight

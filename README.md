@@ -23,7 +23,9 @@ Shared knowledgebase for 7DTD mod development. Used by multiple projects (7nes, 
 - [Runtime WAV Loading (AudioClip from disk)](Runtime%20WAV%20Loading%20(AudioClip%20from%20disk).md) — Ship a loose `.wav` in `Resources/` and decode it into an `AudioClip` at runtime (RIFF chunk-walk + PCM→float + `AudioClip.Create`/`SetData`) with no asset-bundle rebuild; see `FPV/src/FPVWavLoader.cs`
 - [Camera View Switching (First/Third Person)](Camera%20View%20Switching%20(First-Third%20Person).md) — `SetFirstPersonView`/`SetCameraAttachedToPlayer` internals; `playerCamera.transform` IS `cameraTransform`; the cross-mod bug where a temporary view switch leaves the camera + held-item transforms parked and breaks other mods' laser/aim (cone beam, targets own head), and the multi-frame re-assert fix
 - [Paint & Textures](Paint%20%26%20Textures.md) — Block paint texture IDs and the paint system
-- [Reading HID Joysticks (winmm)](Reading%20HID%20Joysticks%20(winmm).md) — P/Invoke `winmm.dll` to read HID joysticks/RC transmitters (legacy Input Manager can't); the `szPname` "Microsoft PC-joystick driver" gotcha and the registry OEM-name lookup for the real device name
+- [Reading HID Joysticks (hid.dll)](Reading%20HID%20Joysticks%20(winmm).md) — read RC transmitters/joysticks via setupapi + hid.dll (legacy Input Manager can't); full 8-axis recipe, plus why winmm is a dead end (only 6 slots — HID Ry and Dial are invisible to it)
+- [Betaflight Rates Math](Betaflight%20Rates%20Math.md) — Faithful Betaflight rateprofile formulas (RC Rate/super rate/expo, throttle MID/EXPO + limit, TPA) for sim flight models; the pre-expo `|stick|` superfactor gotcha, max-vel formula, cached-texture IMGUI curve previews, and the FPV csproj `GameDir` build flag
+- [Chunk Observers & Chunk Loading](Chunk%20Observers%20%26%20Chunk%20Loading.md) — `AddChunkObserver` API for loading/displaying terrain around a non-player viewpoint (camera drone); viewDim caps, SP vs MP-client gating, why the whole pipeline is observer-driven (no camera/player gating), the fast-mover trailing-bubble problem (lead the observer), and the vanilla `chunkobserver` console command + `Time:` log line decoding
 
 ## XUi (UI System)
 
@@ -32,6 +34,7 @@ Shared knowledgebase for 7DTD mod development. Used by multiple projects (7nes, 
 - [HUD Safe Zones](HUD%20Safe%20Zones.md) — Top DAY/TIME strip + bottom message/toolbelt strip must not be overlapped by IMGUI or non-HUD-hiding windows
 - [IMGUI Tracker Stack](IMGUI%20Tracker%20Stack.md) — Right-side stacked status cards for tracked entities (HP bar + status text + fade in/out). Also covers interactive IMGUI tool overlays (alignment / tuning sliders): always include a typeable text field next to step buttons, expose `static IsOpen` so other input listeners can short-circuit (`Event.current.Use()` doesn't block `Input.GetMouseButtonDown`).
 - [zPhone External Apps](zPhone%20External%20Apps.md) — External app manifests, JSON page controls, action bridge registration, and held-item tuning patterns.
+- [Native Radial Menu (XUiC_Radial)](Native%20Radial%20Menu%20(XUiC_Radial).md) — Drive the vanilla radial wheel from a mod via `xui.RadialWindow` (no XML); hold-key-to-select comes free; custom gear/icon sprites; the 2026-06-29 `ExplosionServer`/`clrIdx` API change.
 
 ## Prefab & Binary Formats
 
@@ -76,3 +79,4 @@ Shared knowledgebase for 7DTD mod development. Used by multiple projects (7nes, 
 
 - [ModForge UI Conventions](ModForge%20UI%20Conventions.md) — Compact modal sizing and typography conventions for the ModForge desktop app.
 - [ModForge Managed Agent Docs](ModForge%20Managed%20Agent%20Docs.md) — How modman maintains the sentinel blocks in each mod's CLAUDE.md/AGENTS.md; refreshed only when a mod is opened, never via bulk sweep.
+- [Renaming a Mod (modman)](Renaming%20a%20Mod%20(modman).md) — Full rename checklist (contents, git mv, gh repo rename + SSH-remote gotcha, stale DLLs, old `Mods/` copy); why the folder itself can't be renamed while a modman Claude session is open (session cwd handles) and what to do instead.

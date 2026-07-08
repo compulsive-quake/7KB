@@ -83,6 +83,29 @@ public class BlockMyBlock : Block
 
 For face-aware solidity (partial shapes), use `Block.IsMovementBlocked(world, pos, blockValue, face)`.
 
+### Exact-shape collision — don't approximate blocks as full cubes (C#)
+
+There is **no public per-block collision AABB / shape-extent API**: no `BlockShape`
+type is even resolvable in Assembly-CSharp (checked 2026-07; `Block` itself fails
+plain reflection load due to unresolvable deps). Consequences for custom movers
+(drones, projectiles with volume):
+
+- Any voxel-grid overlap test (`world.GetBlock` + "does my sphere/box touch the
+  1m cell") treats partial blocks — plates, bars, window frames, half-blocks,
+  railings — as **full cubes** and over-blocks gaps that visually exist.
+- For collision that respects real partial-block geometry, query Unity physics
+  against the **baked chunk MeshColliders**: `Physics.BoxCastAll` / `Physics.OverlapBox`
+  (positions offset by `-Origin.position`). They carry the exact shape geometry.
+  Colliders only exist where chunks are *displayed* — a `ChunkObserver` keeps them
+  baked around a remote object.
+- `Voxel.Raycast(world, ray, dist, -538750997, 8, 0f)` (the bullet path) also
+  respects partial-block shapes and is zero-width — a good backstop for unbaked
+  chunks: it can under-block but never over-block.
+- Size the query from the mesh: union `Renderer.bounds` at identity rotation for
+  oriented-box half-extents. A bounding *sphere* inflates a flat object in every
+  axis (FPV mod: a 0.65 m-wide flat quad collided like a 0.9 m sphere and
+  couldn't thread 1 m openings).
+
 ---
 
 ## Shape Types

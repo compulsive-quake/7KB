@@ -165,6 +165,12 @@ dotnet build $project -c Release "/p:GameDir=$gameDir"
 
 Project files can support the same convention by accepting `GameDir`, `SevenDaysToDiePath`, `SEVEN_DTD_CLIENT`, and `SEVEN_DAYS_TO_DIE_PATH`, then validating that `$(GameDir)\7DaysToDie_Data\Managed\Assembly-CSharp.dll` and required mod DLLs such as `Mods\0_TFP_Harmony\0Harmony.dll` exist before `ResolveReferences`.
 
+> **Wrong-`GameDir` build produces a misleading flood of CS0246 errors.** If a `dotnet build` runs with a `GameDir` that doesn't exist on the machine, every `<Reference>` HintPath points at a missing DLL and is silently dropped, so the compiler reports `CS0246: 'Color'/'Vector3'/'GUIStyle'/'Input' could not be found` across **all** files — including ones that have always compiled. The errors look like a code problem but the real cause is unresolved game references. Fix: pass the actual install dir. On this workstation the game is on the D: Steam library, not the csproj's `C:\Program Files (x86)` default:
+> ```bash
+> dotnet build src/FPV.csproj -c Release "-p:GameDir=D:\SteamLibrary\steamapps\common\7 Days To Die"
+> ```
+> (Find it from `steamapps/libraryfolders.vdf`, or just check for `<lib>/steamapps/common/7 Days To Die/7DaysToDie_Data/Managed/Assembly-CSharp.dll`.) modman's own deploy build already knows the right path; this only bites local command-line builds.
+
 ### Mod Gitignore Unity Entries
 
 Always include these Unity workspace ignores in newly-created or repaired mod `.gitignore` files. The root-level hand-authored mod solution/project files and `src/` project are kept; only Unity-generated files under `UnityProject/` are ignored. If Unity has also created root-level `Library/`, `ProjectSettings/`, or `Temp/` folders in a mod whose real Unity project is under `UnityProject/`, treat those root folders as generated noise and ignore them too.
