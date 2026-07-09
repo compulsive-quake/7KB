@@ -29,6 +29,34 @@ public class ModApi : IModApi
 
 Use a unique Harmony ID (reverse domain notation) to avoid conflicts with other mods.
 
+**Wrap `PatchAll` in try/catch.** If ANY patch target in the assembly fails to
+apply, `PatchAll` throws and the exception aborts `InitMod` — the game logs
+`Failed initializing ModAPI instance` and the ENTIRE mod is dead, not just the
+one patch. Catch, `Log.Error`, and continue; patches applied before the failure
+stay live.
+
+## Unpatchable methods — "IL Compile Error … Label #N is not marked"
+
+Some vanilla methods cannot be Harmony-patched at all: MonoMod must re-JIT the
+*original* method's IL, and certain bodies (try/finally with early returns is
+the known trigger, e.g. `PrefabLODManager.UpdateDisplay`) fail with
+
+```
+HarmonyException: IL Compile Error (unknown location)
+  → System.ArgumentException: Label #45 is not marked in method DMD<...>
+```
+
+This is a property of the TARGET method, not your patch — prefix/postfix alike
+fail identically. Workarounds: patch the method's *caller* instead (may have
+the same problem — callers in this engine also love try/finally), or skip
+Harmony and replicate/drive the logic from your own MonoBehaviour Update or
+LateUpdate, reading the manager's public state to stay in sync (e.g. re-run
+your pass when a `lastUpdate`-style timestamp field changes; LateUpdate runs
+after all Updates in the same frame, so your corrections land before the frame
+renders). Real example: FPV's `RunPrefabLodDronePass` +
+`FPVPrefabLODHider` (`FPV/src/FPVPrefabLODPatch.cs`), documented in
+[[Remote Camera World Loading (Drone FPV)]].
+
 ---
 
 ## Patch Types

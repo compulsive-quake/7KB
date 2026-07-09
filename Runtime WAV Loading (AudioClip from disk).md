@@ -27,7 +27,18 @@ folder and decode it into an `AudioClip` at runtime — no bundle, no
   samples); `SetData` takes the full interleaved `float[]`.
 - Reference implementation: `FPV/src/FPVWavLoader.cs`.
 
+## MP3/other compressed sources
+The loader is PCM-WAV-only by design — don't try to decode MP3 in managed code.
+Convert once at authoring time and ship the WAV:
+`ffmpeg -i input.mp3 -ac 1 -ar 44100 -acodec pcm_s16le output.wav`
+(ffmpeg is installed via chocolatey on this machine). Keep the original MP3 in
+`resources/` as the source of truth; only the WAV is deployed. Example: the FPV
+mod's Betaflight startup melody (`betaflight_startup.mp3` →
+`betaflight-startup.wav`).
+
 ## Applies when
 Any mod that wants recorded audio without an asset-bundle round-trip. Same
 runtime-`AudioClip` path the FPV mod already uses for its synthesized rotor
-sounds — this just fills the buffer from a file instead of a synth.
+sounds — this just fills the buffer from a file instead of a synth. For the
+synth side (RPM→pitch model, anti-rasp spectral tuning), see
+[Synthesized Drone Rotor Audio](<Synthesized Drone Rotor Audio.md>).

@@ -215,6 +215,21 @@ UIAtlases/
 
 The game **auto-discovers** these by filename — no C# registration needed. This is different from radial menu icons (`UIAtlas/`), which require runtime injection via `MultiSourceAtlasManager.AddAtlas()`.
 
+These PNGs are not limited to item icons — any XUi element can use one as an arbitrary UI glyph via `sprite="filename" atlas="ItemIconAtlas"` (see [XUi - Window System](XUi%20-%20Window%20System.md)). New atlas PNGs are baked at game load, so adding one needs a **restart**, not just `xui reload`.
+
+### Rasterizing SVG icon art to PNG (this dev machine)
+
+No SVG converter is installed globally (no ImageMagick / Inkscape / rsvg-convert). Working recipe (Uncover mod, 2026-07): install `@resvg/resvg-js` (prebuilt native binary, installs in ~1s) in a temp dir and run a 5-line node script:
+
+```js
+import { Resvg } from '@resvg/resvg-js'
+import { readFileSync, writeFileSync } from 'fs'
+const resvg = new Resvg(readFileSync('icon.svg', 'utf8'), { fitTo: { mode: 'width', value: 128 } })
+writeFileSync('out.png', resvg.render().asPng())
+```
+
+Gotcha: LLM/user-supplied SVGs often carry a malformed namespace like `xmlns="http://w3.org"` — resvg needs the real `xmlns="http://www.w3.org/2000/svg"` or it renders nothing. Fix the namespace before rendering. Render at 128×128 even for 32px UI slots; the atlas scales down cleanly.
+
 ### Gotcha: rendering icons from skinned-mesh prefabs
 
 When auto-generating an item/block icon by rendering a prefab to PNG in Unity (e.g. an `ExportPrefabIcons` editor script with an off-screen camera + bounds-fit framing), a **rigged/armatured FBX** — i.e. one imported as a `SkinnedMeshRenderer` (`animationType` not `None`) — produces a **blank or tiny-speck icon**. Tell-tale sign: Unity's own Project-window thumbnail for that prefab is **blank grey** too, while a static-mesh prefab in the same project previews fine.

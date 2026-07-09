@@ -93,10 +93,26 @@ Last 100 log messages. Errors and exceptions include stack traces.
 ```json
 {
   "log": [
-    {"time": "14:30:05.123", "type": "Log", "message": "Something happened"},
-    {"time": "14:30:06.456", "type": "Error", "message": "NullRef...\n  at Foo.Bar()..."}
+    {"seq": 41, "run": "79fcf3059880", "time": "14:30:05.123", "type": "Log", "message": "Something happened"},
+    {"seq": 42, "run": "79fcf3059880", "time": "14:30:06.456", "type": "Error", "message": "NullRef...\n  at Foo.Bar()..."}
   ]
 }
+```
+
+Since 1.2.0, entries carry a monotonic `seq` (restarts at 1 each game launch) and a per-process `run` id — compare `run` across reads to detect a game restart.
+
+### GET /api/console/stream (since 1.2.0)
+Live console log as **Server-Sent Events** — one persistent socket, entries pushed as they happen. Prefer this over polling `/api/console` for any log-follow UI (ModForge's Game Log panel uses it).
+
+- Fresh connect replays a ~200-entry backlog, then streams live.
+- Each event has `id: <seq>` and a JSON `data:` payload identical to a `/api/console` entry (`seq`/`run`/`time`/`type`/`message`).
+- Reconnecting `EventSource` clients resume exactly via the standard `Last-Event-ID` header (`?since=N` also works). If the resume point is ahead of the server's counter (game restarted → seq reset), the server falls back to the backlog; clients detect the new session by the changed `run` id.
+- A `: keepalive` comment is sent every 15 s when the log is quiet, so dead sockets get noticed.
+
+```bash
+curl -N http://localhost:7860/api/console/stream
+# id: 350
+# data: {"seq":350,"run":"79fcf3059880","time":"16:44:34.177","type":"Log","message":"..."}
 ```
 
 ### GET /api/screenshot

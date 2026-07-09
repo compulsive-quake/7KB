@@ -110,3 +110,28 @@ Implemented in RocketTurret `ItemActionRocketTurretPointer.IsCameraParked` +
 `RocketTurretLaserView.LateUpdate` (self-heal) + `TryGetPaintedTarget` (aim
 fallback). Note: the earlier "read `playerCamera` instead of `cameraTransform`"
 workaround there was a no-op for exactly the reason above — they're one transform.
+
+## Don't measure a crosshair *reach* limit along the camera ray
+
+Same camera-height coupling bites any feature that resolves a crosshair spot and
+caps its **reach**. FPV's drone placement raycast from `cameraTransform` capped
+reach by the **slant distance along the ray**. That distance is
+`cameraHeight / sin(down-pitch)`, so it scales with how high the camera sits:
+
+- **Stance**: the standing eye is ~0.7m above the crouched one, so a nearby floor
+  that a crouched player could place silently vanished when standing (longer
+  slant blew past the cap) — and reappeared on crouch. Bumping the cap (5m→9m)
+  only moves the shallow-angle edge; it doesn't decouple it.
+- **Post-recall parked camera** (above): the camera lingering near its
+  third-person pose is even higher, so the slant to a near floor exceeds the cap
+  and the placement ghost disappears until the camera resettles (or you crouch /
+  move, which forces a rig recompute). The classic report: "after flying a drone
+  and pressing Esc I can't place the next one until I crouch."
+
+Fix: cap by **horizontal ground distance from the player** (`dx²+dz²` from
+`owner.position`), not the slant. Cast the look ray *farther* than the cap
+(`PlacementRayLength` ≈ 14m vs `MaxPlacementReach` ≈ 9m) so a near floor is always
+*found* regardless of camera height, then reject any resolved spot past the
+horizontal cap. A near floor a fixed distance ahead is then placeable at any
+stance and survives a not-yet-resettled camera; a true horizon/sky gaze still
+hits nothing. Implemented in FPV `FPVDroneManager.TryComputeGroundSpot`.

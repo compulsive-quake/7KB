@@ -44,6 +44,110 @@ yourself.
 
 ---
 
+## Combined vehicle prefab contract (Route A with your own physics)
+
+Verified against decompiled `EntityFactory`/`EntityVehicle`/`Vehicle` (V 2.x,
+2026-07, built for the Supra mod). If you ship a full custom prefab via the
+entity `Prefab` property (instead of only overriding `Mesh` on a vanilla
+vehicle), the engine expects this exact structure:
+
+```
+MyCarP (root)                  ← becomes RootTransform
+  Physics                      ← PhysicsTransform = prefabT.Find("Physics")
+    Rigidbody                  ← vehicleRB (engine forces useGravity=false and
+                                  applies its own -9.81*mass each FixedUpdate;
+                                  set automaticCenterOfMass=false + explicit low
+                                  centerOfMass for a car or Init overwrites it
+                                  with (0, 0.1, 0))
+    Wheel0..WheelN             ← SetupWheels does PhysicsTransform.Find("Wheel"+i)
+                                  .GetComponent<WheelCollider>() — NPEs if missing.
+                                  One per wheelN part in vehicles.xml, contiguous.
+    B* (BoxColliders)          ← body collision, bake layer 21 ("Physics")
+  GameObject                   ← literally named "GameObject"! EntityFactory does
+                                  prefabT.Find("GameObject") and, if found, makes
+                                  it the entity host + ModelTransform. Vanilla
+                                  vehicle prefabs all have this oddly-named child.
+    M                          ← paint/part root ("M/..." paths in vehicles.xml;
+                                  chassis paint="M")
+    Wheel0..WheelN             ← VISUAL wheels: vehicles.xml steerTransform /
+                                  tireTransform are found under
+                                  Vehicle.GetMeshTransform() (= ModelTransform,
+                                  or its "Mesh" child if one exists)
+```
+
+Key facts:
+
+- **No baked tags needed** — `EntityVehicle.Init` sets `E_Vehicle` on the root
+  and recursively on the Physics subtree at runtime. (Bake layer 21 on the
+  Physics colliders anyway; Init only re-layers the `Physics` node itself.)
+- **Wheel order = steering order.** `EntityVJeep.UpdateWheelsSteering` steers
+  `wheels[0]` and `wheels[1]` — make Wheel0/Wheel1 the front axle.
+- **Motor model:** `wheelC.motorTorque = input * motorTorque_turbo[i] *
+  wheel.torqueScale_motor` — the XML torque is applied PER WHEEL, not split.
+  RWD = `torqueScale_motor_brake` `"0, 1"` on fronts, `"1, .75"` on rears.
+  Non-turbo input is additionally halved (`!running → wheelMotor *= 0.5`).
+  `velocityMax_turbo` is a hard horizontal-velocity clamp, so real-world top
+  speeds are safe to encode directly (Supra: 69.3 m/s turbo).
+- **WheelCollider placement:** pivot the collider `suspensionDistance *
+  targetPosition` above the visual wheel center so the loaded wheel rests at
+  the visual position (vanilla 4x4: pivot 0.14 above hub, susDist .43, target .5).
+- **Splitting wheels out of a Sketchfab car FBX** (two shapes seen so far):
+  - *Single mesh, wheels tagged by material* (`*_WH*`): split triangles by
+    material, cluster into 4 wheels by quadrant around the wheel-soup centroid.
+  - *Multi-node* (Supra 2026-07, "maya2sketchfab" exports): each wheel is its
+    own node but with MIXED materials (tire + rim `metal`/`GlossBlackpaint`
+    shared with the body), so material-splitting would tear rim triangles off
+    the body. Instead classify a NODE as a wheel iff its renderer carries a
+    `tire` material, and keep brake-caliper nodes in the body so they don't
+    spin with the rim.
+  In both cases rebuild each wheel mesh with the pivot at its hub, and verify
+  the car's front from a material centroid (bonnet/hood at +Z, or taillights /
+  license-plate at -Z) before trusting the export's orientation. See
+  `Supra/UnityProject/Assets/Editor/SetupSupraPrefab.cs` for the full pipeline.
+- **Inspecting an unknown binary FBX before adapting the pipeline:** node and
+  material names are readable by regex-scanning the binary for
+  `name\x00\x01Model|Material` pairs (python, no FBX SDK), and referenced
+  texture paths by scanning for `*.png|jpe?g`. For geometry (per-node bounds,
+  submesh→material map, which nodes are wheels), run a throwaway editor script
+  headless (`Supra/UnityProject/Assets/Editor/SupraInspectFbx.cs` pattern:
+  import → instantiate → dump `NODE path verts tris center size mats=[...]` →
+  `EditorApplication.Exit`). Sketchfab FBX materials are often ALL plain white
+  with textures referenced from the author's absolute paths — expect to
+  hardcode per-material-name colors/textures in the build script.
+- **Paint/dye contract — material slot 0 under the `paint` transform gets
+  STOMPED (Supra, 2026-07):** `Vehicle.SetColors` → `VehiclePart.SetColors`
+  runs at every spawn/load and does `renderers[0].material.color = tint` where
+  `renderers[0]` is the FIRST renderer under the chassis `paint` transform and
+  the tint is the item's `TintColor` property override — **opaque white
+  (1,1,1,1) when no dye is installed**. Two consequences for custom prefabs:
+  1. Slot 0 of that renderer MUST be the car-paint material. If your bake
+     orders submeshes alphabetically, something else lands there (the Supra's
+     `balck_tint_glass` did → the game painted the windows opaque white;
+     "dye applied to the windows"). Pin the paint material to slot 0 in the
+     mesh build.
+  2. The paint material's `_Color` is REPLACED, not multiplied — author the
+     actual paint color in the albedo TEXTURE and keep `_Color` white
+     (vanilla vehicles all do this: `4X4truck` etc. are white-`_Color` +
+     `_MainTex` atlas). A color authored in `_Color` is lost at spawn.
+  The same slot-0 material is also cached as `vehicle.mainEmissiveMat`;
+  `VPHeadlight.SetTailLights` writes `_EmissionColor` on it only if the
+  headlight part sets `tailEmissive`, so leave that property unset unless
+  slot 0 has a proper (mostly-black) emission map. Renderers tagged `LOD`
+  under the paint transform get their whole material REPLACED by the slot-0
+  instance — don't tag custom child renderers `LOD` unless they should take
+  paint. Verify what actually shipped by dumping renderer material order from
+  the bundle with UnityPy (`MeshRenderer.m_Materials` → material names).
+- Vanilla 4x4 reference numbers (dumped from `vehicles.bundle` with UnityPy):
+  Rigidbody mass 2400, drag .05/.05; WheelCollider r=.63, mass 45, susDist .43,
+  spring 15000/2000/.5, friction stiffness 1.8. Addressables bundles live under
+  `Data/Addressables/Standalone/automatic_assets_entities/vehicles.bundle` —
+  NOT in `data.unity3d`.
+- `LootList` (not just `LootListAlive`) is what vanilla vehicles use for their
+  storage container; the container is defined in `loot.xml` (`count="0"`,
+  empty element).
+
+---
+
 ## entityclasses.xml — required properties
 
 ```xml
@@ -745,6 +849,7 @@ vehicles:
 | Rider stuck inside the ground on dismount | All `seat.exit` candidates are blocked. Add an "above" exit (`0,1.5,0`) |
 | WASD does nothing while riding | Route A vehicle with no `motor*` or `force*` entries, OR Route B vehicle whose `OnUpdateLive` returns before the input handler runs |
 | Bike falls under gravity when nobody's on it | Custom prefab with no `useGravity = false` on the synthesized rigidbody |
+| Windows/glass render opaque white (or dye colors the wrong part) | `VehiclePart.SetColors` stomped material slot 0 of the first renderer under the `paint` transform with the tint (white when undyed). Put the car-paint material at slot 0 and author its color in the albedo texture with white `_Color` — see the paint/dye contract above |
 
 ---
 

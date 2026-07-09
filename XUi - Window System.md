@@ -884,6 +884,15 @@ radial.SetCommonData(UIUtils.ButtonIcon.RightStick, OnRadialCommand);
 
 - The wheel manages its own lifecycle when opened from a held key (e.g. Reload/R):
   stays open while the key is held, fires the handler for the highlighted entry on release.
+- **Quick-tap fires entry 0!** The wheel only becomes visible after a 0.25s `displayDelay`;
+  if the key is released before that, `XUiC_Radial.Update` deliberately selects the FIRST
+  enabled entry and fires it (vanilla's "tap = default action" shortcut). If your first entry
+  shouldn't be a tap default, guard the handler with an elapsed-time check — record
+  `Time.time` when you call `Open()` and ignore commands arriving within ~0.35s (vanilla's
+  toolbelt radial uses the same trick with 0.4s in `HandleToolbeltCommand`). Releasing after
+  the wheel is visible with nothing hovered correctly fires nothing.
+- `radialButtonPressed` treats ANY of Reload/Activate/Flashlight/Inventory/Swap/QuickMenu
+  (incl. `PermanentActions`) as "still held" — you don't get to pick which key holds it open.
 - Entry count is flexible (2, 4, 8… all lay out fine).
 - **Custom icons**: drop PNGs in `UIAtlases/ItemIconAtlas/` and reference them by filename
   (no extension) with atlas `"ItemIconAtlas"`. They do NOT have to be item icons — arbitrary

@@ -124,6 +124,75 @@ To change a property on an existing entity:
 
 ---
 
+## Zombie targeting internals (V2.6) — making zombies attack a custom thing
+
+How zombies decide what to chase (verified against V2.6 b14 vanilla
+`entityclasses.xml` + decompiled AI tasks; the FPV mod's zombie-aggro proxy is a
+worked example):
+
+- In V2.6, `zombieTemplateMale` uses **pipe-delimited inline lists** in a single
+  `AITask` / `AITarget` property (not the numbered `task1` form above):
+  `ApproachAndAttackTarget class=EntityPlayer,0,EntityBandit,0,EntityEnemyAnimal,0,EntityAnimal`
+  and `SetNearestEntityAsTarget class=EntityPlayer,0,0,EntityBandit,0,-10`.
+- The `class=` tokens resolve via `EntityFactory.GetEntityType` and match by
+  **C# type assignability** (`Type.IsAssignableFrom`). To be chase-able, your
+  entity's C# class must derive from one of the listed types. `EntityAnimal`
+  (abstract, no abstract members — subclassing is enough) is the lightest base
+  zombies will chase/attack. Zombies only *proactively notice* players and
+  bandits though (bandit see-dist is a mere 10 m), so for anything else drive
+  acquisition yourself:
+- **`entity.SetAttackTarget(target, ticks)`** (ticks at 20/s) force-aggros an
+  `EntityAlive`. `EAIApproachAndAttackTarget.CanExecute` accepts whatever the
+  current attack target is as long as its type matches the class list — no
+  visibility/faction re-check. It also self-syncs to MP clients (sends
+  `NetPackageSetAttackTarget`). Skip `IsSleeping` entities and don't steal
+  targets that are alive unless you mean to.
+- `EAISetNearestEntityAsTarget` explicitly ignores the vanilla robotic drone:
+  `if (!(entityAlive is EntityDrone) && check(...))` — don't derive from
+  `EntityDrone` if you want zombies to see the entity.
+
+**Spawning a C#-driven entity (Chucky/FPV pattern):**
+
+- `Class="Namespace.Type, AssemblyName"` in `entityclasses.xml` resolves via
+  plain `Type.GetType`, which cannot see mod DLLs — install an
+  `AppDomain.CurrentDomain.AssemblyResolve` shim in `InitMod` that returns
+  `Assembly.GetExecutingAssembly()` when `args.Name` matches your assembly.
+- `ModelType="Custom"` + `Mesh="#@modfolder:Resources/bundle.unity3d?Assets/X.prefab"`
+  instantiates your bundle prefab directly — no zombie/SDCS rig needed.
+- `PhysicsBody` may be omitted: `EModelBase` null-guards a missing layout
+  (`physicsBody = null`). Vanilla hitboxes are just colliders with tag
+  `E_BP_Body`/`E_BP_Head`/… on **layer 0 (Default)** under the entity's
+  transform (see `physicsbodies.xml`); melee/bullet damage routing walks up
+  from the hit collider to the `Entity` component, so a hand-made tagged
+  `BoxCollider` child works as a hitbox.
+- Spawn: `EntityClass.FromString(name)` (-1 if unregistered) →
+  `EntityFactory.CreateEntity(classId, worldPos) as MyEntity` →
+  `world.SpawnEntityInWorld(ent)`; remove with
+  `world.RemoveEntity(id, EnumRemoveEntityReason.Despawned)`. Server-side only —
+  gate on `!world.IsRemote()`.
+- Override `IsSavedToFile() => false` on manager-driven ephemeral entities or a
+  quit mid-flight bakes an orphan into the save. To pin an entity to a moving
+  position, call `SetPosition(pos)` every frame and zero `motion` (+
+  `fallDistance`) in `OnUpdateLive` so gravity never accumulates.
+- Keep the model invisible with `emodel.SetVisible(false, _isKeepColliders: true)`
+  — and override `VisiblityCheck(...)` to re-hide, because the engine re-shows
+  models by camera distance every tick.
+- **A proxy pinned to a manager-flown object trips that object's own Physics
+  queries.** The proxy's hitbox permanently overlaps the object it shadows, so
+  any `Physics.OverlapBox`/`BoxCastAll` the manager runs at the object's
+  position returns it — in the FPV mod this froze takeoff (overlaps come back
+  as distance-0 sweep hits that read as collisions) and instant-detonated the
+  bomb the moment it armed (`OverlapBox` contact check). Filtering by
+  `collider.GetComponentInParent<MyEntity>()` alone proved unreliable; make the
+  filter hierarchy-robust: also test `collider.transform.IsChildOf(entity.transform)`
+  and `IsChildOf(entity.PhysicsTransform)` (7DTD can detach the physics rig
+  from the entity root, orphaning colliders from the `Entity` component), and
+  skip `distance <= 0` hits in movement sweeps (see *Unity Sweep Casts &
+  Resting Contact*). Implementation: `IsProxyCollider` in
+  `FPV/src/FPVDroneManager.cs`.
+
+---
+
 ## Damage / XP / Ragdoll C# API — signatures changed in 3.0.0
 
 The 3.0 update changed several entity-combat method signatures. Code built

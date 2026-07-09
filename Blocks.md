@@ -106,6 +106,30 @@ plain reflection load due to unresolvable deps). Consequences for custom movers
   axis (FPV mod: a 0.65 m-wide flat quad collided like a 0.9 m sphere and
   couldn't thread 1 m openings).
 
+### Crosshair "place where I'm looking" pattern (C#)
+
+To set a custom object down at the crosshair like vanilla block placement
+(FPV mod drone launch, `TryComputeGroundSpot`):
+
+1. Cast the **camera** ray, not `EntityAlive.GetLookRay()` — for the local
+   player that resolves to `EntityHuman`'s head-bone ray (off-pivot, no view
+   bob), which drifts off the crosshair at steep pitch. Use
+   `new Ray(player.cameraTransform.position + Origin.position, player.cameraTransform.forward)`
+   (Voxel.Raycast wants un-shifted world space).
+2. `Voxel.Raycast(world, ray, ~5f, -538750997, 8, 0f)`; hit at
+   `Voxel.voxelRayHitInfo.hit.pos`. No hit within reach → no placement
+   (that's the "can't place on air" rule; also hide any ghost preview).
+3. Nudge the hit back out of the struck face (`hit - ray.direction * 0.1f`)
+   so a wall hit probes the air in front of the block, then raycast **down**
+   a bounded distance (~3 m) from slightly above that point to find the floor.
+   No floor within the bound → refuse (aiming over a cliff edge is air).
+4. Lift the result by the object's collision radius so it rests on, not in,
+   the surface.
+
+Validate once in the item action (`TryGet…` returning the denial tooltip
+string) and pass the spot into the spawn/launch code instead of recomputing —
+recomputing on a later frame can disagree with the preview the player saw.
+
 ---
 
 ## Shape Types

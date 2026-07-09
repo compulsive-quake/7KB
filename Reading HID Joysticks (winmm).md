@@ -93,3 +93,28 @@ rest-relative delta self-calibrates regardless of which way the switch throws
 or whether it idles at 0, 0.5, or 1. Exclude axes already bound to flight
 channels from this capture so brushing a gimbal doesn't steal the bind.
 Implementation: `TryGetCapturedActionAxis` in `FPV/src/FPVControls.cs`.
+
+## Gotcha: throttle channel direction varies per radio — a reversed one reads "stuck"
+
+A transmitter's throttle channel can be reversed (radio-side channel reverse,
+mixer weight -100, or just how the model was set up), so stick-bottom reports
+raw **1.0** and stick-top **0.0**. A non-centering throttle read as `raw 0..1`
+then fails in a deceptively quiet way that presents as "the craft won't take
+off" (note: a real FPV-mod stuck-on-ground bug turned out to be resting-contact
+sweep freeze instead — see *Unity Sweep Casts & Resting Contact* — so confirm
+with the live axis readout before blaming the radio):
+
+- Stick at idle reads high → any "drop throttle to idle" arming safety never
+  clears (or clears only at *full* stick).
+- Once armed, pushing the stick up commands ~0% thrust, so the craft never
+  lifts; the motor audio still responds to stick movement (mirrored), which
+  makes the input path look healthy.
+
+Diagnosis trick: if motor audio pitch is driven by commanded throttle (FPV's
+loop sweeps pitch 0.52→1.85 over throttle 0→1), the periodic `audio dbg` log
+lines are a readout of what the flight model actually received — pitch pinned
+near the bottom of the sweep while the pilot holds full stick proves the
+command is ~0 without any extra instrumentation. Fix: per-binding `Invert`
+flag (`controls.json` → `Throttle.Invert`, or Options → Controls), or reverse
+the channel on the radio — not both. The mod now also logs the live stick %
+while the throttle safety holds, and prints it in the "Disarmed!" HUD prompt.

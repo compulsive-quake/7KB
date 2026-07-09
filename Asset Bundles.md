@@ -208,6 +208,13 @@ keeps audio out of the Unity bake pipeline entirely.
   ship. Copy the specific `.wav`s into a non-excluded dest folder (e.g.
   `<dest>/Sounds`) in the post-`/MIR` block, exactly like the unity bundle is
   copied. Load them at runtime from `Path.Combine(AirstrikeModApi.ModPath, "Sounds", name)`.
+- **The sharper version of that gotcha (Supra, 2026-07):** on Windows,
+  `resources/` (model sources) and `Resources/` (shipping bundle) are the SAME
+  directory — NTFS and robocopy `/XD` are case-insensitive. A Unity build that
+  writes `Resources/foo.unity3d` while scaffold sources sit in `resources/`
+  silently merges them, and excluding `resources` from deploy then excludes the
+  bundle too. Keep model/source assets in a differently-named folder
+  (`model-src/`) and let `Resources/` ship normally.
 - **Play 3D:** `go.AddComponent<AudioSource>()` with `spatialBlend=1`,
   `rolloffMode=Linear`, `min/maxDistance`, `dopplerLevel=0` (keep authored pitch),
   then `Destroy(go, clip.length + 0.25f)`. Parent the source to a moving object

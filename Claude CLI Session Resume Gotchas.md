@@ -21,3 +21,12 @@ Learned while fixing ModForge's "No conversation found with session ID: …" err
 ## Related
 
 - [[Claude AskUserQuestion in Headless Mode]] — another `--print` stream-json quirk (the CLI auto-fails interactive tools) handled in the same files.
+
+## Usage windows
+
+Learned while fixing ModForge's Claude usage banner (2026-07-08).
+
+- `rate_limit_event` stream-json lines may only include `status`, `resetsAt`, and `rateLimitType`; mapping unknown non-allowed statuses to a fixed warning percent can make ModForge stale or wrong.
+- The exact same usage text shown by Claude's `/usage` command is available without spending tokens via:
+  `claude --print --output-format stream-json --verbose "/usage"`
+- Parse the assistant/result text lines (`Current session`, `Current week (all models)`, and current-model weekly such as `Current week (Fable)`) for exact `N% used` and reset labels. Keep `rate_limit_event` as a fallback and for live reset/status events.
