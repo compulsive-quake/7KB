@@ -50,34 +50,53 @@ basis: the beam balloons into a screen-filling **cone** (near endpoint at/behind
 the camera near plane) and the painted target lands on the **operator's own
 head** instead of under the crosshair.
 
-## Fix — re-assert first person over a few frames (in the switching mod)
+## Fix — a LateUpdate watchdog, NOT a fixed-frame coroutine (in the switching mod)
 
-Don't rely on a single inline restore. After handing control back, re-assert for
-~3 frames on a persistent (`DontDestroyOnLoad`) MonoBehaviour:
+A fixed-count re-assert (`for i in 0..3: yield return null; SetFirstPersonView…`)
+in a **coroutine is not enough** and was the bug behind "after flying a drone I
+can't place another until I crouch". Two reasons it silently fails:
+
+1. **Wrong phase.** Coroutines resume *before* `LateUpdate`. The leftover third-
+   person camera controller re-parks the camera in *its own* `LateUpdate`, i.e.
+   *after* your re-assert ran — so the frame renders parked anyway.
+2. **Too few frames.** `SetControllable(true)` propagates through the camera rig
+   over an unknown number of frames; until it does, `SetFirstPersonView(true)`
+   won't take. A fixed 3-frame budget can expire before that, then stop trying.
+
+Do it in **`LateUpdate`** on a persistent host (the mod's singleton), and keep
+re-asserting **until verified**, not for a fixed count:
 
 ```csharp
-for (int i = 0; i < 3; i++)
-{
-    yield return null;                 // let SetControllable propagate to the rig
-    if (owner == null) yield break;
-    if (!owner.bFirstPersonView) owner.SetFirstPersonView(true, false);
-    owner.SetCameraAttachedToPlayer(true, false);   // force camera back on the rig
-    if (i == 0) owner.inventory?.ForceHoldingItemUpdate();  // rebuild held-item xform
+void LateUpdate() { if (_restoreOwner != null) RunWatchdog(); }
+
+void RunWatchdog() {
+    if (Time.time > _deadline) { _restoreOwner = null; return; }   // ~2s cap
+    var o = _restoreOwner;
+    if (!o.bFirstPersonView) o.SetFirstPersonView(true, false);
+    bool parked = ((o.cameraTransform.position + Origin.position)
+                   - o.getHeadPosition()).sqrMagnitude > 1f;       // gap > ~1m
+    if (parked) { o.SetCameraAttachedToPlayer(true, false); _confirm = 0; }  // wins the frame
+    else if (++_confirm >= 4) _restoreOwner = null;                // held FP → done
+    if (_rebuildHeld) { _rebuildHeld = false; o.inventory?.ForceHoldingItemUpdate(); }
 }
 ```
 
-- `SetCameraAttachedToPlayer(true,false)` is public, idempotent, and unconditional
-  — it reparents + resets the camera local pose regardless of control state.
-- **`ForceHoldingItemUpdate()`**, not `ShowHeldItem()`: `ShowHeldItem`→
-  `updateHoldingItem` **early-outs** when the held item is unchanged, so it can't
-  un-park a stale transform. `ForceHoldingItemUpdate` destroys+recreates the
-  model (`m_LastDrawnHoldingItemIndex = -1`), forcing a clean rebuild. Call it
-  once (per restore) to avoid holster flicker.
-- `yield` can't sit inside a `try/catch`; wrap the per-frame body in a static
-  helper that try/catches internally.
+- Verify by the **camera→head gap**, not a frame count: only stop once the camera
+  has sat on the head for several consecutive `LateUpdate`s (SetControllable has
+  propagated and the re-park has stopped). Healthy FP keeps the gap well under 1m.
+- `SetCameraAttachedToPlayer(true,false)` resets the camera local pose
+  **synchronously**, so doing it in `LateUpdate` is what the frame renders with —
+  it beats a controller that re-parked earlier the same frame.
+- **Cancel the watchdog when you switch back to third person** for the next drone,
+  or it fights your own view switch.
+- **`ForceHoldingItemUpdate()`**, not `ShowHeldItem()`: the latter early-outs when
+  the held item is unchanged, so it can't un-park a stale transform; the former
+  destroys+recreates the model (`m_LastDrawnHoldingItemIndex = -1`). Once per
+  restore, to avoid holster flicker.
 
-Implemented in FPV `FPVDroneManager.RestoreHudAndPlayerControl` /
-`FinalizeFirstPersonRestore`. See also [[Player Feedback Sounds]].
+Implemented in FPV `FPVDroneManager.LateUpdate` / `ArmCameraRestoreWatchdog` /
+`RunCameraRestoreWatchdog` (replaced the old `FinalizeFirstPersonRestore`
+coroutine). See also [[Player Feedback Sounds]].
 
 ## Defending the *consuming* mod (when the switcher is vanilla)
 
@@ -128,10 +147,23 @@ reach by the **slant distance along the ray**. That distance is
   move, which forces a rig recompute). The classic report: "after flying a drone
   and pressing Esc I can't place the next one until I crouch."
 
-Fix: cap by **horizontal ground distance from the player** (`dx²+dz²` from
-`owner.position`), not the slant. Cast the look ray *farther* than the cap
-(`PlacementRayLength` ≈ 14m vs `MaxPlacementReach` ≈ 9m) so a near floor is always
-*found* regardless of camera height, then reject any resolved spot past the
-horizontal cap. A near floor a fixed distance ahead is then placeable at any
-stance and survives a not-yet-resettled camera; a true horizon/sky gaze still
-hits nothing. Implemented in FPV `FPVDroneManager.TryComputeGroundSpot`.
+Fix has **two halves**, both in FPV `FPVDroneManager.TryComputeGroundSpot`:
+
+1. **Reach cap on the horizontal ground distance** (`dx²+dz²` from
+   `owner.position`), not the slant. Cast the look ray *farther* than the cap
+   (`PlacementRayLength` ≈ 14m vs `MaxPlacementReach` ≈ 9m) so a near floor is
+   always *found* regardless of camera height, then reject any resolved spot past
+   the horizontal cap. A floor a fixed distance ahead is then placeable at any
+   stance; a true horizon/sky gaze still hits nothing.
+2. **Parked-camera raycast fallback.** The horizontal cap alone still fails if the
+   camera is parked *behind/above* the head (post-recall), because the ray then
+   originates from the wrong place — the spot lands far out or behind the player.
+   So detect the parked pose by the camera→head gap (`(cam.pos+Origin) − getHead`
+   > ~1m) and, when parked, cast from `getHeadPosition()` + `GetLookVector()`
+   instead of the camera basis. Use the camera basis in the healthy case for exact
+   crosshair alignment (the head bone drifts off the reticle at steep pitch — see
+   [[Entities]] "Crosshair alignment") and only drop to the head basis while parked.
+
+With the LateUpdate watchdog above now holding the camera on the head, half (2)
+should rarely fire in practice — but it's kept as defence-in-depth (and documents
+the consumer-side pattern) in case a frame slips through before the watchdog wins.

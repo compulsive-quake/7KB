@@ -553,6 +553,37 @@ This is how UI overhaul mods handle compatibility with each other.
 </rect>
 ```
 
+### Round buttons / skeuomorphic panels via custom UIAtlas sprites
+XUi has no circular primitive — ship PNGs in `UIAtlases/UIAtlas/` (sprite name =
+filename) and layer them. Pattern used by the Elevator mod's cab-style floor
+picker (`tools/gen_ui_sprites.ps1` there generates the art procedurally with
+System.Drawing — deterministic seed, no art tools needed):
+
+- `disc.png`: dark radial-gradient circle with a bright rim, transparent corners.
+- `glow.png`: soft white ring slightly LARGER than the disc (art the ring radius
+  a few % outside the disc's alpha edge, or the opaque disc hides it) — toggle
+  `IsVisible` from the controller to mark the active/selected item.
+- full-window texture (e.g. brushed metal): plain `<sprite sprite="mytex"/>`
+  stretched to window size; omit `type="sliced"`.
+
+```xml
+<rect name="btnFloor0" depth="3" pos="34,-22" width="232" height="48" style="press" sound="[paging_click]">
+    <sprite depth="4" name="glow0" sprite="elev_btn_glow" pos="-4,4" width="56" height="56" visible="false"/>
+    <sprite depth="5" sprite="elev_btn_circle" pos="2,-2" width="44" height="44"/>
+    <label depth="6" name="num0" pos="2,-13" width="44" height="22" font_size="18" justify="center" text=""/>
+    <label depth="6" name="lbl0" pos="64,-15" width="168" height="22" font_size="16" justify="left" text=""/>
+</rect>
+```
+
+Child `pos` may be negative/above the parent rect (the glow overhangs by 4px) —
+positions are plain offsets; nothing clips outside a scroll view.
+
+> **Generating atlas PNGs from PowerShell**: `Add-Type -TypeDefinition $cs
+> -ReferencedAssemblies System.Drawing` FAILS under pwsh 7 (System.Drawing.Common
+> on .NET 10 forwards to a private `System.Private.Windows.GdiPlus` assembly that
+> Add-Type can't reference). Run the generator under Windows PowerShell 5.1
+> instead: `powershell.exe -NoProfile -ExecutionPolicy Bypass -File gen.ps1`.
+
 ---
 
 ## Controls (Reusable Templates)

@@ -7,6 +7,61 @@ fully scripted locomotion (e.g. a hover bike or flying mount).
 
 ---
 
+## ⚠️ Game update ~2026-06-29 (Steam buildid 23906531) — Entity API break
+
+A Steam update rewrote the entity init + activation APIs. Symptom: mods that
+compiled before suddenly fail with **CS0115 "no suitable method found to
+override"**. Verified while porting Oppressor (2026-07-09). Changes:
+
+- **`Entity.Init(int)` → `Init(int _entityClass, EntityInstanceAssets _assets,
+  EModelInstanceAssets _eModelAssets)`.** The model prefab now arrives via
+  `_assets`; `EntityFactory` still assigns `RootTransform`/`ModelTransform`
+  *before* calling `Init`, so pre-`base.Init` scaffolding still works.
+- **Activation commands are now id/callback-based**, replacing the
+  index-array system:
+  - `GetActivationCommands(Vector3i, EntityAlive)` is **gone**. Base command
+    sets are declared in `InitLocalActivationCommands(Action<EntityActivationCommand> _addCallback)`
+    (EntityVehicle registers `drive, ride, service, repair, lock, unlock,
+    storage, keypad, refuel, take, horn` by string id).
+  - Enable/disable logic lives in
+    `AllowActivationCommand(ReadOnlySpan<char> _commandName, EntityPlayerLocal _playerFocusing)`
+    — compare with the inherited helper `CommandIs(span, "drive")`.
+  - `OnEntityActivated(int, Vector3i, EntityAlive)` →
+    `void OnEntityActivated(EntityActivationCommand _command, EntityPlayerLocal _playerFocusing)`
+    (returns void, dispatch on `_command.commandId`).
+  - `EntityActivationCommand` is now a struct with `commandId`, `icon`,
+    `commandText` (already localized via `entitycommand_<id>` at ctor time),
+    `enabled`, `activateTime`. To relabel a base command, override
+    `InitLocalActivationCommands`, wrap the callback, and rewrite
+    `cmd.commandText` on the struct copy before forwarding.
+  - The `ReadOnlySpan<char>` parameter forces the mod to compile against the
+    **game's own mscorlib** — see the BCL-reference note in
+    [Mod Structure](Mod%20Structure.md).
+- **`Entity.PhysicsInit` destroys a direct `RootTransform` child *named*
+  `"Physics"`** when it also finds a `"Physics"`-*tagged* transform under
+  `ModelTransform` (it assumes a stale duplicate; logs "has old Physics").
+  `Entity.InitCommon` tags any pre-seeded `PhysicsTransform` with the
+  `"Physics"` tag, so a synthesized physics stub must **not** be named
+  `"Physics"` or it gets destroyed at end of frame → `vehicleRB` goes null.
+  Name it anything else (e.g. `"OppressorPhysics"`) and pre-assign
+  `PhysicsTransform` before `base.Init`.
+- **`EModelBase.DoRagdoll`** grew a leading `RagdollMode` enum param:
+  `DoRagdoll(RagdollMode _mode, float stunTime, EnumBodyPartHit, Vector3
+  forceVec, Vector3 forceWorldPos, bool isRemote)` (`RagdollMode.Default`
+  matches old behavior).
+- **Vehicle storage UI**: `XUiC_LootWindowGroup.SetTileEntityChest` and
+  `GUIWindowManager.CloseAllOpenWindows` are gone. The base "storage"
+  activation command opens the vehicle `bag` via
+  `LockManager.Instance.LockRequestLocal(this, new EntityLockContext("storage", bag), 0)`
+  — don't hand-roll the looting window anymore.
+- `EntityAlive` now declares a non-virtual `LateUpdate()`; a scripted-motion
+  `LateUpdate` in a subclass needs the `new` keyword (CS0108 otherwise).
+
+The code samples below have been updated to the new API where marked; older
+snippets that still show `Init(int)` / index-based activation are pre-update.
+
+---
+
 ## Two routes for a custom vehicle
 
 ### Route A — vanilla physics, XML only
@@ -86,8 +141,35 @@ Key facts:
   wheel.torqueScale_motor` — the XML torque is applied PER WHEEL, not split.
   RWD = `torqueScale_motor_brake` `"0, 1"` on fronts, `"1, .75"` on rears.
   Non-turbo input is additionally halved (`!running → wheelMotor *= 0.5`).
+  For real-world launch tuning in normal driving, double the desired effective
+  forward wheel torque in the first `motorTorque_turbo` slot; use the third
+  slot for the un-halved turbo/shift torque.
   `velocityMax_turbo` is a hard horizontal-velocity clamp, so real-world top
   speeds are safe to encode directly (Supra: 69.3 m/s turbo).
+- **Acceleration tuning — compare against vanilla, not reality (Supra 2026-07):**
+  effective accel ≈ `XMLtorque × (0.5 if non-turbo) × Σ torqueScale_motor /
+  (wheelRadius × rigidbodyMass)`. Vanilla rigidbody masses (dumped from
+  `vehicles.bundle`): bicycle/minibike/motorcycle **250 kg**, gyrocopter 500,
+  4x4 2400. A "realistic" car tune (1700 Nm/wheel on 1550 kg) accelerates
+  *slower* than the motorcycle (1400 XML on 250 kg ≈ 7.4 m/s²) and feels dead.
+  **Traction cap:** per-axle peak force ≈ `axleLoad × fwdFrictionStiffness`
+  (default curve extremum 1.0); torque demand far past the peak pushes slip
+  onto the friction *asymptote* (0.5 × peak) — more XML torque then makes the
+  vehicle SLOWER. A 1550 kg RWD car with stiffness-2 tires caps near 10 m/s²;
+  to go quicker either raise stiffness in the prefab or give the front wheels
+  partial `torqueScale_motor` (rear-biased AWD, XML-only, no bundle rebuild).
+- **Live vehicle tuning at runtime (Supra Tuner, 2026-07):** everything the
+  motor model reads is publicized and writable per entity — `ev.GetVehicle()`
+  gives `MotorTorqueForward/Backward/TurboForward/TurboBackward`,
+  `VelocityMax*` (same 4), `brakeTorque`; `ev.wheels[i]` gives
+  `motorTorqueScale` and the friction bases. Write grip to
+  `forwardStiffnessBase`/`sideStiffnessBase`, NOT the WheelCollider —
+  `SetWheelsForces` recomputes `wheelC.forwardFriction.stiffness =
+  forwardStiffnessBase * frictionPercent` every physics tick and would stomp
+  a direct write. Values reset on entity reload, so re-apply on attach (poll
+  `player.AttachedToEntity as EntityVehicle` + entityId change in a
+  MonoBehaviour). The non-turbo 0.5× input halving applies to reverse too.
+  The Supra mod wires these to a zPhone app (`Supra/zphone/`, `SupraTuning`).
 - **WheelCollider placement:** pivot the collider `suspensionDistance *
   targetPosition` above the visual wheel center so the loaded wheel rests at
   the visual position (vanilla 4x4: pivot 0.14 above hub, susDist .43, target .5).
@@ -137,6 +219,14 @@ Key facts:
   instance — don't tag custom child renderers `LOD` unless they should take
   paint. Verify what actually shipped by dumping renderer material order from
   the bundle with UnityPy (`MeshRenderer.m_Materials` → material names).
+- **Generated mesh `.asset` files from a heavy FBX can exceed GitHub's 100 MB
+  hard push limit** (Supra 2026-07: the rebuilt 1.13 M-vert body mesh
+  serialized to ~105 MB and blocked `git push`). Gitignore the generated
+  `Generated/*.asset` (+ `.meta`) — they're rebuilt from the FBX by the
+  headless build — and if one is already in an unpushed commit, rewrite that
+  commit (`git restore --staged .` → `git rm --cached <assets>` →
+  `git commit --amend`); GitHub rejects the push if ANY commit in the range
+  contains a >100 MB blob, not just the tip.
 - Vanilla 4x4 reference numbers (dumped from `vehicles.bundle` with UnityPy):
   Rigidbody mass 2400, drag .05/.05; WheelCollider r=.63, mass 45, susDist .43,
   spring 15000/2000/.5, friction stiffness 1.8. Addressables bundles live under
@@ -271,6 +361,14 @@ just leaving `engine`/`motor*`/`force*`/`wheel*` out.
 - **`position` / `rotation`** — the rider's *ModelTransform* local offset
   inside the vehicle. RootTransform always sits at the vehicle origin;
   the seat displaces only the visible body.
+- **Live seat tuning pattern:** for a temporary tuning DLL, poll input from
+  `ModEvents.UnityUpdate`, require
+  `player.AttachedToEntity != null` and
+  `EntityClass.GetEntityClassName(player.AttachedToEntity.entityClass)` to
+  match the target vehicle, then adjust `player.ModelTransform.localPosition`
+  and log an XML-ready `seatN.position` line. This changes the same transform
+  the attach pipeline set from XML, so the logged Y can be baked back into
+  `vehicles.xml` and the temporary key bindings removed.
 - **`pose`** — integer index into the `vehiclePoseHash` animator
   parameter (see **Seat Poses** below).
 - **`IK*Position` / `IK*Rotation`** — solver targets for the rider's
@@ -443,13 +541,23 @@ vehicle.EnterVehicle(player)
 In a custom `EntityVehicle` subclass, the minimum you need:
 
 ```csharp
-public override bool OnEntityActivated(int idx, Vector3i tePos, EntityAlive activator)
+// V2.x API (post 2026-06-29 update) — id-based commands, void return.
+public override void OnEntityActivated(EntityActivationCommand _command, EntityPlayerLocal _playerFocusing)
 {
-    if (/* ride command */) {
-        EnterVehicle(activator);   // hand off — the pipeline does the rest
-        return true;
+    if (CommandIs(_command.commandId, "drive") || CommandIs(_command.commandId, "ride")) {
+        EnterVehicle(_playerFocusing);   // hand off — the pipeline does the rest
+        return;
     }
-    // ... storage, pickup, etc.
+    base.OnEntityActivated(_command, _playerFocusing);   // storage, take, etc.
+}
+
+// Scripted-flight vehicles have no engine parts, so base's isDriveable()
+// check disables "drive" — override the allow hook to enable it yourself:
+public override bool AllowActivationCommand(System.ReadOnlySpan<char> _commandName, EntityPlayerLocal _playerFocusing)
+{
+    if (CommandIs(_commandName, "drive") || CommandIs(_commandName, "ride"))
+        return !IsDead() && /* your seat-availability logic */;
+    return base.AllowActivationCommand(_commandName, _playerFocusing);
 }
 
 public override int AttachEntityToSelf(Entity _entity, int slot = -1)
@@ -538,11 +646,14 @@ inside `EntityVehicle.Init` and `PostInit` on the missing
 `PhysicsTransform` / `vehicleRB`:
 
 ```csharp
-public override void Init(int _entityClass)
+// V2.x API. Do NOT name the stub "Physics" — Entity.PhysicsInit destroys a
+// RootTransform child with that exact name once InitCommon has tagged your
+// pre-seeded PhysicsTransform with the "Physics" tag (see API-break section).
+public override void Init(int _entityClass, EntityInstanceAssets _assets, EModelInstanceAssets _eModelAssets)
 {
     if (PhysicsTransform == null && RootTransform != null)
     {
-        var physGO = new GameObject("Physics");
+        var physGO = new GameObject("MyVehiclePhysics");
         physGO.transform.SetParent(RootTransform, worldPositionStays: false);
         var rb = physGO.AddComponent<Rigidbody>();
         rb.isKinematic = true;
@@ -550,7 +661,7 @@ public override void Init(int _entityClass)
         rb.mass = 150f;
         PhysicsTransform = physGO.transform;
     }
-    base.Init(_entityClass);
+    base.Init(_entityClass, _assets, _eModelAssets);
 }
 ```
 
@@ -788,6 +899,27 @@ if (nextPos.y < floor) {
     if (_verticalSpeed < 0f) _verticalSpeed = 0f;
 }
 ```
+
+**Voxel-only floors sink through runtime platforms** (verified: Oppressor
+on the Elevator mod's gliding car, 2026-07). Runtime-moved geometry exists
+only as PhysX colliders; the heightmap says the floor is gone, so a
+voxel-floored vehicle descends through the platform, then snaps up when the
+blocks are re-placed. Fix: max the voxel floor with a downward SphereCast on
+the chunk-collider layer (16); skip `distance == 0` hits (initial overlap —
+see [Unity Sweep Casts & Resting Contact](Unity%20Sweep%20Casts%20%26%20Resting%20Contact.md)):
+
+```csharp
+float floor = world.GetHeight(Mathf.FloorToInt(p.x), Mathf.FloorToInt(p.z)) + hoverOffset;
+Vector3 origin = p - Origin.position + Vector3.up * 0.5f;
+if (Physics.SphereCast(origin, 0.4f, Vector3.down, out var hit, 8f, 1 << 16)
+    && hit.distance > 0f)
+    floor = Mathf.Max(floor, hit.point.y + Origin.position.y + hoverOffset);
+```
+
+The downward cast only ever finds floors at/below the vehicle, so normal
+terrain behavior (incl. the `GetHeight` whole-column/roof quirk) is
+unchanged. See EntityOppressor.FloorYAt and
+[Moving Platforms & Riding Entities](Moving%20Platforms%20%26%20Riding%20Entities.md).
 
 ---
 

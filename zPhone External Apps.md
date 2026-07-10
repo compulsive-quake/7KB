@@ -23,7 +23,11 @@ The manifest `type` should be a public class in the named mod assembly with a pu
 
 **Symptom: app stuck on black "Loading" screen.** The page's `stateAction` (e.g. `rocketTurret.requestState`) fires on open and the page waits for the matching `stateEvent` (e.g. `rocketTurret.state`) before rendering. If the mod ships `zphone/app.json` + `page.json` but no actions class (or the class lacks a public static `Register()`), `ZPhoneAppRegistry.RegisterExternalActions()` logs `App '<id>' did not expose <Type>.Register()`, no handler answers the state request, and the page hangs on "Loading" forever. Fix: add the `<Type>` class with `Register()` wiring `*.requestState`/`*.setFloat`/`*.action` and a `SendState()` that emits the `stateEvent` with `installed = true` plus every `stateField` the page references. RocketTurret's class mirrors FPV's (minus prop-spin) — copy that pattern. The class lives in the mod DLL, so this is a restart-kind change (deploy + game restart, not xui_reload).
 
-External page JSON supports controls such as `button`, `number`, `toggle`, `select`, `heading`, `text`, `stat`, and `info`. A common tuning layout uses:
+External page JSON supports controls such as `button`, `number`, `toggle`, `select`, `heading`, `text`, `stat`, and `info`. Since July 2026, `button`, `toggle`, `number`, `select`, and `heading` also accept an optional `hint` string: the webapp renders a small "?" icon next to the label and shows the text in a hover/click tooltip (`HintDot` in `ExternalAppPage.tsx`; position:fixed so it never clips inside the scroll body). Use hints to explain what a tunable does and its units — first used by the Supra Tuner app.
+
+**Opening the phone while driving (fixed July 2026):** while attached to a vehicle the game swaps the toolbelt for the vehicle inventory, so `PlayerHasPhone` couldn't see a phone carried on the toolbelt and Shift+Z silently did nothing while driving. `ZPhoneKeyListener` now polls the has-phone check once a second while on foot and trusts that cached result while attached. Nothing else in the open path gates on vehicles.
+
+A common tuning layout uses:
 
 - `stateAction` / `stateEvent` for initial state and refreshes.
 - Number controls that send `{ field, value }` through a `*.setFloat` action.

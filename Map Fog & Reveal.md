@@ -76,6 +76,49 @@ see the result. This is Uncover's `uncover` command.
 
 ---
 
+## Spawn freeze after a full reveal (fog DB load holds its lock)
+
+Once the fog DB is fully populated, clicking Spawn freezes the game for many
+seconds (~9s on a 6k map / 169 region files). Log tell: right after
+`PlayerSpawnedInWorld` there is a silent gap ending in
+`ChunkManager mesh regeneration thread resumed after N.Ns blocked` (the VML
+queue backs up because the main thread is stalled).
+
+Cause (verified against the July 2026 build, `MapChunkDatabaseByRegion`):
+
+- `IMapChunkDatabase.TryCreateOrLoad` schedules `LoadAsync` via
+  `ThreadManager.AddSingleTask` when the player's chunk observer is created at
+  spawn — background thread, so far so good.
+- But `Load(rootDirectory)` holds `m_regionsLock` for the **entire** load, and
+  parses each `r.X.Y.7rm` with 262,144 individual `ReadUInt16` calls through a
+  `GZipStream` plus a LINQ `SequenceEqual(EMPTY_CHUNK_DATA)` per chunk —
+  ~50ms+ per region on Mono.
+- The main thread blocks on that same lock on its first frame after spawn:
+  vanilla `EntityPlayer.Update` → `mapDatabase.Add(chunkPos, world)` (the 9×9
+  reveal) takes it, as does any `GetMapColors`/`Contains` (map, minimap).
+
+On a normal save only a few region files exist so nobody notices; a full
+reveal makes every region exist and turns the load into a multi-second lock
+hold = main-thread freeze.
+
+Fix (see `MapDbLoadPatch` in the Uncover mod): Harmony-prefix-replace `Load` to
+(1) bulk-decompress each region into a reusable 512KB buffer and convert chunks
+with `Buffer.BlockCopy` instead of per-ushort reads, and (2) parse regions
+OUTSIDE the lock, locking only for the per-region dictionary insert. Load drops
+to well under a second and the main thread never waits. File format: 4-byte raw
+version header, then gzip of 32×32 chunks × 256 little-endian ushorts; an
+all-zero 512-byte chunk slice means unexplored (slot stays null = fog). Set
+`m_dirty = false` / `m_lastRegionPath` on the rebuilt `RegionData` or the next
+save rewrites every region. `Save` also holds the lock across all regions but
+skips clean ones cheaply, so it's only slow right after the reveal itself.
+
+The original ~9s freeze turned out to be TWO stacked causes: the lock hold
+above, plus the HUD minimap's first full-window redraw writing ~1M texels
+through `GetRawTextureData<Color32>()` (~5s by itself) — see
+[Texture2D Pixel Writes (GetRawTextureData vs SetPixels32)](Texture2D%20Pixel%20Writes%20(GetRawTextureData%20vs%20SetPixels32).md).
+
+---
+
 ## Console command from a mod DLL (no Harmony needed)
 
 `SdtdConsole.RegisterCommands` calls

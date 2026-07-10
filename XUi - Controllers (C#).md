@@ -287,6 +287,13 @@ Key differences from XUi controllers:
 
 > **Setting sprite color at runtime** — `XUiV_Sprite` color can be changed via the `Color` property. Use reflection if the property name varies by game version (`Color`, `color`, `TintColor`).
 
+> **Moving a view at runtime** — `XUiView.Position` (the `pos=` attribute) has a public setter that sets `positionDirty` + `SetDirty()`, so the transform is reapplied on the next UI update. Works any time after Init, e.g. to make a button track the bottom of a variable-length list:
+> ```csharp
+> XUiController btn = GetChildById("btnAddBelow");
+> if (btn != null) btn.ViewComponent.Position = new Vector2i(16, -(140 + 36 * rowCount));
+> ```
+> Coordinates use the same convention as XML `pos` (y negative going down, relative to the parent).
+
 > **The `[Preserve]` attribute** — Add `[Preserve]` (from `UnityEngine.Scripting`) to any class referenced only via XML `controller=""` attributes or reflection. Unity's IL stripping may remove classes that aren't directly referenced from code.
 
 > **`OnOpen()` fires children-first** — child controllers' `OnOpen()` runs before the parent window's `OnOpen()`. If a child (e.g., a grid) needs data populated by the parent, do NOT read it in the child's `OnOpen()`. Instead, have the parent explicitly call a method on the child *after* preparing the data in its own `OnOpen()`.
