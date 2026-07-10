@@ -170,6 +170,20 @@ Key facts:
   `player.AttachedToEntity as EntityVehicle` + entityId change in a
   MonoBehaviour). The non-turbo 0.5× input halving applies to reverse too.
   The Supra mod wires these to a zPhone app (`Supra/zphone/`, `SupraTuning`).
+- **Rollover in corners (Supra 2026-07):** a car flips when lateral accel ×
+  CoM height exceeds g × half-track. Side grip stiffness S lets the tires
+  pull ~S·g laterally, so grippy sports tires (stiffness 2) flip a CoM that
+  would be fine on vanilla tires — the Supra's baked CoM y=.35 gave a ~2.3g
+  static threshold, right at the grip limit. Two fixes, both runtime (no
+  bundle rebuild): lower `vehicleRB.centerOfMass` (engine only overwrites it
+  when `automaticCenterOfMass` is true — see prefab contract above; re-apply
+  on attach since entity reload restores the prefab value), and add
+  anti-roll bars in a `FixedUpdate` (classic recipe: per axle, force =
+  (travelL − travelR) × strength, push compressed corner up / extended down
+  via `AddForceAtPosition`; travel from `GetGroundHit` point in wheel-local
+  space). ~30% of spring rate (15000 vs springs 50000) is a good start.
+  `WheelCollider` needs a `UnityEngine.VehiclesModule.dll` reference —
+  it is NOT in PhysicsModule.
 - **WheelCollider placement:** pivot the collider `suspensionDistance *
   targetPosition` above the visual wheel center so the loaded wheel rests at
   the visual position (vanilla 4x4: pivot 0.14 above hub, susDist .43, target .5).
@@ -913,8 +927,19 @@ float floor = world.GetHeight(Mathf.FloorToInt(p.x), Mathf.FloorToInt(p.z)) + ho
 Vector3 origin = p - Origin.position + Vector3.up * 0.5f;
 if (Physics.SphereCast(origin, 0.4f, Vector3.down, out var hit, 8f, 1 << 16)
     && hit.distance > 0f)
-    floor = Mathf.Max(floor, hit.point.y + Origin.position.y + hoverOffset);
+    floor = Mathf.Max(floor, hit.point.y + Origin.position.y + hoverOffset - 1f);
 ```
+
+**Mind the one-block offset between the two sources**: `Chunk.GetHeight`
+stores the Y of the *topmost solid block* (see `Chunk.RecalcHeights` —
+`m_HeightMap[i] = y` of the first non-air block), which is one below the
+walkable surface, while `hit.point.y` is the *actual surface*. If both get
+the same `+ hoverOffset`, the collider floor sits exactly one block higher
+and wins the `Max()` — and since **terrain chunk colliders are on layer 16
+too** (the game's own roof-check raycast in `EntityVehicle.OnEntityActivated`
+uses mask `65536`), it wins *everywhere*, pinning the vehicle a full block
+off the ground. Subtract `1f` on the collider branch (verified with
+Oppressor, 2026-07-09, game buildid 23906531).
 
 The downward cast only ever finds floors at/below the vehicle, so normal
 terrain behavior (incl. the `GetHeight` whole-column/roof quirk) is

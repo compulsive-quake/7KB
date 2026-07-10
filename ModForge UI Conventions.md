@@ -55,7 +55,6 @@ A new global setting touches, in order: `Settings` struct in `src-tauri/src/sett
 ## Beta feature toggles
 
 - Settings has a `Beta` tab (before Updates in `SettingsPanel.tsx`) that collects experimental feature toggles. Beta toggles default to enabled (`bool_default_true`) so existing behavior is unchanged until a user opts out.
-- `webapp_viewer_enabled` / `webappViewerEnabled`: gates the webapp review dialog, change toast (`App.tsx`), and the per-mod Webapp editor button (`LeafPaneView.tsx`). When disabled, the `/webapp-review` route in `mcp.rs` (`handle_webapp_review`) short-circuits to an `approve` decision before parking the PostToolUse hook, so agent webapp edits are auto-approved with no dialog.
 - `sketchfab_assets_enabled` / `sketchfabAssetsEnabled`: gates the Sketchfab Assets toolbar button (`Toolbar.tsx`) and the `assets` section route; `App.tsx` bounces `section === "assets"` back to `mods` if the toggle is off so the user is never stranded on a blank pane.
 
 ## Installed mod manager
