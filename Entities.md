@@ -221,6 +221,30 @@ live assembly without launching the game:
 PowerShell 7's `ReflectionOnlyLoadFrom`/`MetadataLoadContext` are unavailable, so
 prefer `ilspycmd`.
 
+### Blocking incoming damage — where to patch (3.0.0)
+
+- **Player**: `EntityPlayerLocal` overrides `DamageEntity` (calls
+  `base.DamageEntity` then shakes the camera). A Harmony prefix there
+  (`__result = 0; return false`) blocks zombie hits, falls, explosions, and
+  suffocation/drowning ticks — everything routed through the virtual
+  `DamageEntity` chain. `EntityPlayer.DamageEntity` itself just gates on
+  `GameStats.GetBool(EnumGameStats.IsPlayerDamageEnabled)` — flipping that stat
+  is the vanilla dm-god-mode path, but it's MP-synced and toggles the god-mode
+  indicator, so a scoped patch is cleaner for a per-toggle cheat. Note: health
+  drains from *already-active* buffs (bleeding, infection) do NOT go through
+  `DamageEntity` — block those at `EntityBuffs.AddBuff` instead. **Gotcha**:
+  the debug-menu god mode (Q / `PlayerMoveController.toggleGodMode`) applies
+  its invulnerability via `Buffs.AddBuff("god")` (the `god` buff carries
+  `GeneralDamageResist +1` and the HUD icon; the `IsGodMode` flag alone only
+  gives fly/no-collision). A blanket AddBuff blocker silently kills the Q
+  toggle — exempt the `"god"` buff name.
+- **Vehicle**: `EntityVehicle : EntityAlive` does NOT override `DamageEntity`.
+  All three damage paths — attacks (`ProcessDamageResponseLocal`), accumulated
+  collision wear (`ApplyAccumulatedDamage`), and hard-landing fall damage in the
+  physics update — converge on the private `EntityVehicle.ApplyDamage(int)`.
+  One prefix there (`return false`) makes vehicles invulnerable.
+  (zPhone God app "No Vehicle Damage" / "No Player Damage" toggles.)
+
 ---
 
 ## Local Player Camera View (first ↔ third person, C#)

@@ -170,6 +170,41 @@ Key facts:
   `player.AttachedToEntity as EntityVehicle` + entityId change in a
   MonoBehaviour). The non-turbo 0.5× input halving applies to reverse too.
   The Supra mod wires these to a zPhone app (`Supra/zphone/`, `SupraTuning`).
+- **Custom radial command + icon (Supra "Paint", 2026-07):** subclass the
+  vehicle entity, append in `InitLocalActivationCommands` via
+  `_addCallback(new EntityActivationCommand(id, icon))`; label comes from
+  Localization `entitycommand_<id>`, and the radial resolves the icon as
+  UIAtlas sprite `ui_game_symbol_<icon>` — mods can ship that sprite as
+  `UIAtlases/UIAtlas/ui_game_symbol_<icon>.png` (Oppressor does the same).
+  Enable it in `AllowActivationCommand` (unknown ids default to disabled)
+  and handle it in `OnEntityActivated`.
+- **Custom car paint vs the dye system (Supra 2026-07):** to let players pick
+  arbitrary colors, neutralize the paint material once
+  (`mat.mainTexture = Texture2D.whiteTexture`) and write `mat.color`; get the
+  material from `vehicle.mainEmissiveMat` (cached by SetColors at spawn).
+  `Vehicle.SetColors` stomps `_Color` white at every spawn/load AND on every
+  driver enter/leave (`AttachEntityToSelf` slot 0 calls it) — a poll re-apply
+  leaves a visible white flash, so Harmony-postfix `Vehicle.SetColors`
+  (`__instance.entity` is public) and re-assert in the same frame; keep a
+  slow poll only as a safety net. Persist per
+  `entityId` in the SAVE folder (`GameIO.GetSaveGameDir()`) — ids are
+  per-save and the save dir survives redeploys, unlike the deployed mod's
+  Config/. To keep vanilla dyes from fighting it, hide the vehicle window's
+  cosmetics grid via a Harmony postfix on
+  `XUiC_VehicleWindowGroup.CurrentVehicleEntity` setter
+  (`cosmeticGrid.ViewComponent.IsVisible = false` for your class only).
+- **Brake lights (Supra 2026-07):** don't use the vanilla `tailEmissive`
+  headlight property — it writes `_EmissionColor` on the slot-0 PAINT
+  material (`vehicle.mainEmissiveMat`), i.e. the whole body glows. Instead
+  drive a dedicated taillight material: clone ONLY that slot via the
+  `sharedMaterials` array (never call `renderer.materials` — it re-instances
+  every slot including the game's instanced slot-0 paint material, orphaning
+  `mainEmissiveMat` until the next SetColors), then flip `_EmissionColor`
+  from `Vehicle.CurrentIsBreak` (set each physics tick; MP-synced via entity
+  flags; gate on `HasDriver`). CRITICAL: the `_EMISSION` Standard-shader
+  variant must ship in the bundle — enable the keyword on the material at
+  PREFAB BUILD time (black emission = off); `EnableKeyword` at runtime alone
+  renders nothing because the variant was stripped.
 - **Rollover in corners (Supra 2026-07):** a car flips when lateral accel ×
   CoM height exceeds g × half-track. Side grip stiffness S lets the tires
   pull ~S·g laterally, so grippy sports tires (stiffness 2) flip a CoM that

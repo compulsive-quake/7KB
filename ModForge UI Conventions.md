@@ -11,6 +11,10 @@ Shared conventions for the ModForge desktop app UI.
 
 - Prompts submitted while an agent is thinking belong only in the prompt queue UI above the prompt bar. Do not emit them into the agent feed until they actually dequeue and send.
 
+## UI performance
+
+- Avoid high-frequency `git_diff_summary(..., include_diff=true)` calls from visible React components. On 2026-07-14, brief UI lockups during typing were traced to repeated git diff work in Source Control and Codex live edit summaries. Keep Source Control refreshes serialized and slow (currently every 5 minutes), and use `includeDiff=false` for periodic/background Codex diff snapshots unless exact patch text is needed for a one-shot action.
+
 ## Deploy queue marker
 
 - Codex deploy requests use a root-level `.modforge-deploy` trigger file in the mod folder. ModForge consumes and deletes this marker immediately after the non-recursive per-mod watcher sees it, so the file often will not remain visible in Explorer; judge success by the deploy queue/badge/modal, not by marker persistence.

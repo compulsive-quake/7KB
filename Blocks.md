@@ -300,6 +300,26 @@ GameManager.Instance.SetBlockTextureServer(
 
 ---
 
+## Variant Helper Blocks (SelectAlternates)
+
+To let one held item place several block variants (vanilla "hold Reload → Shape" picker, used by gun safes, coolers, TVs):
+
+```xml
+<property name="SelectAlternates" value="true"/>
+<property name="PlaceAltBlockValue" value="blockA,blockB,blockC"/>
+```
+
+Mechanics (from decompiled `Block`/`ItemClassBlock`, V2.x, 2026-07):
+- The held item's `ItemValue.Meta` is a **plain array index** into `PlaceAltBlockValue` (`Block.GetAltBlock(_typeId)` → `placeAltBlockClasses[_typeId]`, no wrapping/clamping). The Shape picker sets Meta; freshly crafted items have Meta 0.
+- On placement, `Block.OnBlockPlaceBefore` swaps the placed `BlockValue` for `GetAltBlockValue(Meta)` (rotation preserved). The helper block itself is never placed unless it appears in its own list.
+- **Self-inclusion works**: a craftable block can list *itself* as alt 0 and act as its own variant helper — no separate `*VariantHelper` block needed, and the crafted item name / recipe / already-placed blocks stay unchanged (Elevator mod's `elevatorControlPanel` does this). Vanilla always uses a separate never-placed helper block instead, but that's convention (distinct art/colors needing a generic icon), not a code requirement.
+- The Shape picker shows each alt's localized block name + icon, so give variants distinct `Localization.txt` names even if they share a `CustomIcon`.
+- Alt blocks don't need `CreativeMode Player`; they can stay Dev/hidden and remain placeable through the picker.
+
+> **Vanilla typo:** the plate-offset elevator panel block is named `elevatorInsidePanelPlateOffest` ("Offest") in the game's blocks.xml — `Extends` must use the typo'd name.
+
+---
+
 ## Block Class Hierarchy
 
 The game has several block base classes for different purposes:

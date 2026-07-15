@@ -390,3 +390,35 @@ type-name ambiguity when both mods load). The only behaviour dropped was the
 Lesson: if a reflected cross-mod feature has no hard dependency on the other
 mod's *types*, porting the self-contained part is cleaner than guarding every
 call site on `ModBridge.IsInstalled(...)`.
+
+## Hiding a vanilla block-entity model to re-dress it (rescan, don't snapshot)
+
+When you replace a block's look by disabling its vanilla renderers and parenting
+your own procedural meshes under the block-entity model transform (Elevator's
+`ElevatorPanelView` does this — a plate + buttons over the vanilla control panel),
+the game **force-enables every renderer under that transform** on each redisplay:
+`Chunk.SetBlockEntityRendering` does `GetComponentsInChildren<Renderer>` + set
+`enabled = true`, called from `OnDisplayBlockEntities` whenever `bHasTransform &&
+!bRenderingOn`. So the hide must be re-asserted every frame, not fire-and-forget.
+
+Gotcha: re-asserting from a **snapshot** of the vanilla renderers (captured once
+when you first dressed the block) goes stale. The game can rebuild the block
+entity's model **in place** — `Chunk.AddEntityBlockStub` swaps the
+`BlockEntityData` for a position (old one → `blockEntityStubsToRemove`, pooled via
+`poolBlockEntityTransform`), and `GameObjectPool` can hand the **same** model
+GameObject back on the next display, or a paint/damage/rotation change regenerates
+the mesh. A fresh set of vanilla `Renderer` instances then appears under the
+*same* anchor transform. If your dead-check keys on `bed.transform != anchor` it
+won't fire (same transform), your dressing root survives, but your captured list
+no longer references the live renderers — nothing re-hides them and the **vanilla
+model reappears and stays** ("sometimes it resets to the vanilla look" — Elevator,
+fixed 2026-07-14).
+
+Fix: each frame, rescan the anchor's **current** hierarchy and disable every
+renderer that isn't part of your dressing (skip `r.transform.IsChildOf(yourRoot)`),
+instead of trusting a one-time snapshot. Use the non-allocating
+`GetComponentsInChildren(includeInactive, List<Renderer>)` overload with a static
+scratch list so the per-frame scan doesn't churn GC. Panels/dressed blocks are few
+per world, so a full rescan is cheap. Keep the one-time snapshot only for measuring
+the vanilla footprint (LOD0 bounds), not for the hide. Reference:
+`Elevator/src/ElevatorPanelView.cs` (`ReassertHidden`).

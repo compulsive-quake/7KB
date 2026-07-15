@@ -130,6 +130,64 @@ Implemented in RocketTurret `ItemActionRocketTurretPointer.IsCameraParked` +
 fallback). Note: the earlier "read `playerCamera` instead of `cameraTransform`"
 workaround there was a no-op for exactly the reason above — they're one transform.
 
+## The *other* half of the freeze: a stuck input action set (`PlayerActionsLocal.Enabled`)
+
+The camera-park fixes above (watchdog + horizontal reach cap + head-basis
+fallback) still did **not** fully cure "after flying a drone I can't place another
+until I crouch." A read-only idle diagnostic (fires when the player's aim is stuck
+with no menu open) pinned the real stuck field:
+
+```
+IDLE AIM STUCK (no menu open): bCanControlOverride=True inputEnabled=False
+  inputLocked=False fpv=False camGap=2.03m held=fpvTinyDrone
+```
+
+`inputEnabled` here is `PlayerMoveController.playerInput.Enabled`
+(`PlatformManager.NativePlatform.Input.PrimaryPlayer.Enabled`). Player aim /
+mouse-look only run while that set is enabled (see `PlayerMoveController.Update`:
+`flag = !cursorWin && !modal && (playerInput.Enabled || VehicleActions.Enabled)`),
+so with it false the crosshair and `HitInfo` freeze and no placement spot resolves.
+
+**`SetControllable` does NOT touch this.** `SetControllable(b)` →
+`PlayerMoveController.SetControllableOverride` only sets `bCanControlOverride`.
+Restoring control therefore leaves a disabled input set disabled — which is why
+the camera watchdog alone didn't fix it. (Likely the disabled input is also *why*
+the camera stayed parked — the FP camera rig doesn't reattach cleanly while input
+is off — so the two symptoms share this root.)
+
+**Who owns `PlayerActionsLocal.Enabled`: the `ActionSetManager` stack, nothing
+else.** `LocalPlayerUI.ActionSetManager` is a stack of `PlayerActionSet`s; only
+the **top is Enabled**. Opening a `GUIWindow` that `HasActionSet()`
+(`GUIWindowManager.EnableWindowActionSet` → `ActionSetManager.Push`) disables the
+player's set and enables the window's; closing it (`DisableWindowActionSet` →
+`Pop`) re-enables the one below. A view/HUD teardown can leave a **window action
+set orphaned** on the stack (pushed, never popped), so the player's input stays
+disabled with **no window on screen** to explain it. Note the game's own
+`SetHUDEnabled(FullHide)` just `SetActive(false)`s the XUi GameObject — it does
+**not** pop action sets, so hiding the HUD around a feed doesn't cause this by
+itself; the orphan comes from a window (e.g. the pre-flight radial, which opens
+**modal** — `windowManager.Open(windowGroup, _bModal:true)`).
+
+**Fix — rebuild the stack with the game's own `GUIWindowManager.ResetActionSets()`.**
+It pops everything, pushes `playerUI.playerInput` as the enabled base, then
+re-pushes any window still *showing*. With no window showing, the player input
+ends enabled again; an orphan (window not showing) is simply dropped.
+
+Scope the heal tightly so it never yanks input from another mod's legitimately
+open, non-modal UI (the same diagnostic flagged a healthy-camera
+`held=elevatorControlPanel inputEnabled=False`, i.e. a real in-use control-panel
+window — a *false positive* for "stuck"). FPV heals only when: **holding an FPV
+launcher** (`holdingItem.Actions[0] is ItemActionLaunchFpvDrone`), **not actively
+piloting** (`!IsBusy`), and **no modal/cursor window open and `!IsInputLocked`**.
+Because the radial opens *modal*, the `IsModalWindowOpen()` guard already skips it
+while it legitimately owns input; only a closed-but-orphaned set (no modal open,
+input still disabled) triggers the rebuild. Read `.Enabled` reflectively —
+`PlayerActionSet` lives in the InControl assembly the mod doesn't reference.
+
+Implemented in FPV `FPVDroneManager.LateUpdate` → `HealStuckPlacementInput` /
+`IsHoldingLaunchAction` (throttled 0.25s; backs off to 3s if a rebuild didn't
+take). Replaced the read-only `DiagnoseIdleControl` probe that identified the field.
+
 ## Don't measure a crosshair *reach* limit along the camera ray
 
 Same camera-height coupling bites any feature that resolves a crosshair spot and

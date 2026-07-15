@@ -378,6 +378,14 @@ Renders a Unity texture directly, useful for custom images loaded from mod resou
 | `close_group_on_tab` | `"true"` — Tab closes the window group |
 | `clear_button` | `"true"` — shows an X button to clear text |
 
+Code side: `GetChildById("...") as XUiC_TextInput`. Events (verified against Assembly-CSharp, V2/3-era):
+
+- `OnSubmitHandler` — `(XUiController _sender, string _text)`, fires on Enter only. Clicking away does NOT commit; if you need commit-on-close, read `.Text` yourself in `OnClose`.
+- `OnChangeHandler` — `(XUiController _sender, string _text, bool _changeFromCode)`; setting `.Text` from code fires this with `_changeFromCode=true` (it does not fire OnSubmitHandler), so guard against feedback loops.
+- `OnInputAbortedHandler` — `(XUiController _sender)`, fires on Esc.
+
+Numeric-input pattern (used by the Elevator settings Height column): parse in the submit handler, apply through the same validation as the +/- buttons, then re-Populate so the field snaps back to the value that actually took effect on refusal.
+
 ---
 
 ### `<combobox>` — Numeric Stepper / Dropdown
