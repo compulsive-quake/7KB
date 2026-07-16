@@ -83,6 +83,47 @@ public class BlockMyBlock : Block
 
 For face-aware solidity (partial shapes), use `Block.IsMovementBlocked(world, pos, blockValue, face)`.
 
+### `Shape="ModelEntity"` blocks: colliding ≠ shootable (hit 2026-07, Elevator panel)
+
+Symptom: you can't walk through the block, but bullets pass through and it can
+never be damaged or destroyed. The two use completely different paths, and a
+collider satisfies only the first:
+
+- **Movement** is plain Unity physics against the model prefab's colliders. It
+  ignores tags and hierarchy, so *any* collider anywhere in the model makes the
+  block solid to walk into.
+- **Bullets** go through `Voxel.raycastNew`, which reads
+  `phyxRaycastHit.collider.transform.tag` and switches on it. Only
+  `Tags.BlocksMeshBlockEntity` (**`"T_Block"`**) routes into
+  `GameUtils.FindMasterBlockForEntityModelBlock`, the thing that converts a
+  collider hit into a *block* hit. Any other tag fails
+  `GameUtils.IsBlockOrTerrain` (which accepts only `B_Mesh` / `T_Mesh` /
+  `T_Mesh_B` / `T_Block` / `T_Deco`) and is reported as a nondescript transform
+  hit — the shot lands and nothing happens.
+
+**Tags do not inherit**, and the tag is read off the collider's own transform,
+so it must be on the GameObject carrying the Collider — not its parent.
+
+Then the block still has to be *found*: `FindMasterBlockForEntityModelBlock`
+resolves the hit via `RootTransformRefParent.FindRoot`, then
+`Chunk.GetBlockEntity`, which is a reference-equality (`==`) scan against the
+model clone's **root** transform. `FindRoot` walks up looking for a
+`RootTransformRefParent` component and, finding none, returns the transform it
+was handed. So a **child** collider needs `RootTransformRefParent` with
+`RootTransform` pointing at the model root — otherwise the lookup misses and the
+hit is dropped even with the right tag. Set `RootTransform` explicitly rather
+than relying on its `Awake` (`FindTopTransform`): Awake runs when a clone
+activates, by which point it is parented under the chunk and the walk goes past
+the model root to the chunk. Pointing it at the prefab root is safe — the target
+is inside the copied hierarchy, so `Instantiate` remaps it per clone.
+
+Vanilla model-entity prefabs carry the tag (and any needed ref) from the Unity
+editor, so this only bites **prefabs built in code**. Root-collider models get
+the lookup for free (`FindRoot` returns the root itself) but pay for it: the
+root collider flips `BlockShapeModelEntity` to `isCustomBounds` and recomputes
+`GetBounds` as `rotation * colliderBounds + ModelOffset + (.5,0,.5)`, which
+misplaces the bounds for a block with a non-zero `ModelOffset`.
+
 ### Exact-shape collision — don't approximate blocks as full cubes (C#)
 
 There is **no public per-block collision AABB / shape-extent API**: no `BlockShape`
@@ -105,6 +146,20 @@ plain reflection load due to unresolvable deps). Consequences for custom movers
   oriented-box half-extents. A bounding *sphere* inflates a flat object in every
   axis (FPV mod: a 0.65 m-wide flat quad collided like a 0.9 m sphere and
   couldn't thread 1 m openings).
+- **A collision radius is not a rest height.** Same conflation, one step upstream:
+  to sit a model on a surface, lift it by its own mesh's *pivot-to-bottom* distance
+  (`transform.position.y - Renderer.bounds.min.y`), not by the probe radius. FPV set
+  the drone down at `surface + collisionRadius` (0.45 m) — tangent for the *sphere*,
+  but ~0.4 m of daylight under a flat quad, so the placement ghost visibly hovered.
+  Note pivot-to-bottom ≠ half the mesh height: prefab pivots aren't always centred.
+  Keep the probe test at its own tangent height; only the model moves.
+- If a placement probe reads the pad it stands on as an obstruction, that's the same
+  bug: probe from `surface + probeRadius`, rest the model at `surface + meshLift`,
+  and don't let one height serve both.
+- Resting a box *exactly* on a floor makes PhysX report the floor as a zero-distance
+  hit with no contact point and `normal = -direction` on every sweep — including
+  straight up, which freezes takeoff. Either skip `hit.distance <= 0f` or keep a
+  contact skin (FPV does both: 0.03 m of air under the drone).
 
 ### Crosshair "place where I'm looking" pattern (C#)
 

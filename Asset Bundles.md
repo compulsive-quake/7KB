@@ -467,6 +467,8 @@ The wrapper prefab stays at `localScale = (1,1,1)`. No runtime rescale.
 
 After import, **measure** the renderer bounds and warn if they're off — but never silently multiply onto `wrapper.localScale` based on `Renderer.bounds`. World-space bounds can be stale right after instantiation, and a wrong measurement cascades into a 10–100× sizing bug.
 
+The same staleness applies at runtime to **hidden** objects: `GetComponentsInChildren<Renderer>(true)` happily returns renderers under a `SetActive(false)` object, but their `bounds` aren't reliably up to date, so anything that measures-then-rescales (or measures a pivot offset) must `SetActive(true)` *first*. This is easy to miss when a pooled/cached visual is hidden and re-shown with new parameters — FPV's placement ghost re-normalizes bomb→tiny size on a shared prefab, and every hotbar swap passes through a hidden frame, so the measure path is the common one, not the edge case.
+
 ```csharp
 const float TargetLongestAxisMeters = 2.6f; // motorcycle-sized
 

@@ -130,6 +130,7 @@ Implemented in RocketTurret `ItemActionRocketTurretPointer.IsCameraParked` +
 fallback). Note: the earlier "read `playerCamera` instead of `cameraTransform`"
 workaround there was a no-op for exactly the reason above — they're one transform.
 
+<<<<<<< Updated upstream
 ## The *other* half of the freeze: a stuck input action set (`PlayerActionsLocal.Enabled`)
 
 The camera-park fixes above (watchdog + horizontal reach cap + head-basis
@@ -225,3 +226,28 @@ Fix has **two halves**, both in FPV `FPVDroneManager.TryComputeGroundSpot`:
 With the LateUpdate watchdog above now holding the camera on the head, half (2)
 should rarely fire in practice — but it's kept as defence-in-depth (and documents
 the consumer-side pattern) in case a frame slips through before the watchdog wins.
+=======
+## The ~1 m threshold is NOT a floor for near/steep-down aiming
+
+The "past ~1 m = parked" heuristic assumes the failure is a camera *metres* out.
+But a **manual** third→first toggle (not just a mod's programmatic switch) can
+leave the FP camera **~0.27 m behind (and slightly above) the head** — a
+half-restored pose that never trips a 1 m threshold, so `parked=False` and the
+code keeps casting from the camera. That quarter-metre is harmless for a *distant*
+horizontal aim, but for a ray aimed **steeply down at nearby ground** it's fatal:
+the origin sits behind the eyes, so the first voxel hit lands **behind the head**
+(a few cm from the lens) and resolves the spot onto the operator's **own column**.
+Symptom in FPV: drone placement worked in fresh FP, broke after a third→first
+toggle while standing, and *only* worked again while crouched (crouch re-syncs the
+camera onto the head). Confirmed 2026-07-11 via a per-frame `[FPV] PLACE diag`
+dump showing `camGap=0.27m parked=False` and `look ray hit ... at dist=0.18m`.
+
+**Robust fix: originate the ray at `getHeadPosition()`, not the camera** — borrow
+only `cam.forward` for the crosshair direction (fall back to `GetLookVector()`
+when genuinely parked). The head is the true eye point in every stance and can
+never sit behind itself, so a forward ray from it can't clip the operator's own
+column no matter where the camera has drifted. This removes *all* sensitivity to
+camera position, making the 1 m threshold matter only for choosing the direction
+source. Cheaper and more reliable than trying to detect every sub-metre residual.
+Implemented in FPV `FPVDroneManager.TryComputeGroundSpot`.
+>>>>>>> Stashed changes

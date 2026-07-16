@@ -389,6 +389,35 @@ nested `<property class="...">` blocks each with their own
 Anything you omit defaults to zero / disabled, so a "no engine" build is
 just leaving `engine`/`motor*`/`force*`/`wheel*` out.
 
+### How speed actually happens (V2.x decompile, 2026-07)
+
+`velocityMax` is **not** a torque falloff — it's a hard clamp, and the thing
+being clamped ramps. In `EntityVehicle.FixedUpdate`:
+
+- `motorTorque` goes straight to the Unity WheelColliders
+  (`wheel.wheelC.motorTorque = wheelMotor * torque * wheel.motorTorqueScale`),
+  so real acceleration is WheelCollider slip/friction — not reproducible
+  outside Unity. Donor-tune cars are massively over-torqued (6000 N·m, AWD),
+  so the launch is grip-limited, not torque-limited (~1 g with the donor
+  prefab's forward friction stiffness 2.0).
+- The **cap eases**: `velocityMax = Mathf.MoveTowards(velocityMax, target,
+  (target > velocityMax ? 2.5f : 1.5f) * dt)`, then horizontal rigidbody
+  velocity is scaled down to it. So engaging turbo doesn't jump the cap from
+  33 → 69.3; it climbs at 2.5 m/s² and takes ~15 s.
+- The target is `VelocityMaxForward` **regardless of input** — only reverse
+  (`moveForward < 0`) or turbo (`running && CanTurbo && moveForward != 0`)
+  swap it. So the cap sits at the forward value while you idle, and is
+  already there when you press W.
+- `Vehicle.AirDragVelScale` **defaults to 0.997** and multiplies rigidbody
+  velocity every 50 Hz FixedUpdate = a continuous decay of −ln(.997)/.02
+  ≈ 0.15/s. This, not the clamp, sets true terminal speed: a car pulling at
+  ~1 g settles near 9.8/0.15 ≈ 65 m/s, so a 69.3 turbo cap is never reached.
+  Omitting `airDrag_velScale_angVelScale` does not mean "no drag".
+
+Practical: for a hold-W speed model use `dv/dt = a_grip − 0.15·v`, clamped to
+the ramping `velocityMax`. AssettoCar's sounds-page drive preview
+(`src-tauri/src/pipeline/drive_preview.rs`) is built on exactly this.
+
 ---
 
 ## Seats — `seat0`, `seat1`, …
@@ -549,6 +578,82 @@ build a "flying" vehicle without any C#. Pair with `RotateToGround=true`
 `steerTransform` (optional) is the joint that yaws on steering.
 `tireTransform` is the joint that spins. Both reference paths inside the
 vehicle's prefab (typically rooted at `M/`).
+
+---
+
+## Suspension & ground clearance (WheelCollider tuning)
+
+The engine **never touches** the prefab's `suspensionSpring` /
+`suspensionDistance` — whatever the bundle ships is what the car rides
+on. (Friction stiffness IS recomputed every tick in `SetWheelsForces`
+from `wheel.forwardStiffnessBase` / `sideStiffnessBase`, which are
+captured from the prefab at `SetupWheels` — write the bases, not the
+collider, if changing grip at runtime.)
+
+### Do the sag math or your car rides on its bump stops
+
+Static sag past the spring's target point = per-corner load / spring
+rate. A 1550 kg car needs each corner to carry ~3.8 kN; on 50 kN/m
+springs that's 7.6 cm of sag — with 0.16 m travel and `targetPosition`
+0.5 the suspension rests ~97% compressed. Symptoms: the car sits
+visibly lower than the authored mesh stance, and every bump slams the
+chassis collider into terrain because there's no compression travel
+left.
+
+Design procedure (hub positions in body frame, pivot at local `P`):
+
+- hub range: `P` (fully compressed) … `P − suspensionDistance` (full droop)
+- target hub = `P − suspensionDistance × (1 − targetPosition)`
+- equilibrium hub = target + sag, where `sag = load / spring`
+- bump travel from rest = `suspensionDistance × (1 − targetPosition) − sag`
+  — keep this ≥ ~0.08 m for voxel terrain
+- place the pivot so the equilibrium hub sits at (or slightly below)
+  the mesh's authored wheel center; putting it a few cm below raises
+  the resting stance for clearance.
+
+Visuals stay correct automatically: when `tireSuspensionPercent` > 0,
+`EntityVehicle.Update` writes the visual tire transform's local Y from
+`WheelCollider.GetWorldPose` every frame, so wheels stay planted at any
+ride height.
+
+### Raised physics, stock looks: offset the paint root, not the model
+
+Raising the resting stance for clearance makes the body visibly float
+("lifted 4x4" look). Fix it cosmetically without giving up clearance by
+dropping the *body visual* back down inside the prefab:
+
+- Do **not** offset `ModelTransform` ("GameObject") — the engine stomps
+  its world pose every frame (`SetPosition`, `OriginChanged`,
+  `updateTransform` all write `ModelTransform.position`).
+- Instead set a negative local Y on the paint root **`M`** (child of
+  `ModelTransform`). Nothing in the engine ever writes `M`'s transform,
+  so the offset survives; wheel visuals are siblings of `M` and keep
+  re-planting from `GetWorldPose`, so tires stay on the ground while
+  only the body/interior sink.
+- Amount = equilibrium-hub height above the authored wheel center
+  (pivot raise − sag-below-target; see the design procedure above).
+- **Seats must follow**: seat `position` is applied to the *rider's*
+  ModelTransform relative to the vehicle **entity root**, not the body
+  mesh — drop seat Y by the same amount or the driver floats above the
+  interior. Rider-relative IK hand targets follow the seat, so they
+  stay on the (also-dropped) steering wheel.
+
+Worked example: Supra (`SetupSupraPrefab.cs`, `VisualLowerY = 0.039`),
+2026-07.
+
+### Chassis colliders on voxel terrain: wheels are the ground contact
+
+A single full-length box collider with a realistic ground clearance
+(~0.14 m for a sports car) snags on every bump — the corners of the
+front/rear overhangs dig into slope transitions. Shape the boxes so
+only the WheelColliders normally touch ground:
+
+- **Belly box**: span the wheelbase only (a little past the axles),
+  floor at ~0.30 m in body frame.
+- **Nose/tail boxes**: cover the overhangs with a higher floor
+  (~0.42 m) so bumpers still collide with walls/entities but slopes
+  pass underneath (~30° approach/departure).
+- Keep a cabin box for the greenhouse as usual.
 
 ---
 
@@ -805,6 +910,66 @@ list.
 
 ---
 
+## Honking the horn as a mod trigger
+
+The horn is a clean, always-available hook for "the driver did something
+deliberate while seated" — no new keybind needed. `EntityVehicle.UseHorn(
+EntityPlayerLocal player)` is the single call site: `PlayerMoveController.
+Update` routes `playerActionsLocal.VehicleActions.HonkHorn.WasPressed`
+straight to it while the local player is attached to a vehicle (default
+bind **X** / LeftBumper). It plays `hornSound` and fires the vehicle's
+`onHonkEvent`, nothing else — so a Harmony **postfix** is a safe place to
+bolt on behavior:
+
+```csharp
+[HarmonyPatch(typeof(EntityVehicle), nameof(EntityVehicle.UseHorn))]
+public static class Patch_EntityVehicle_UseHorn
+{
+    public static void Postfix(EntityVehicle __instance, EntityPlayerLocal player)
+    {
+        if (player == null || player.AttachedToEntity != __instance) return;
+        // __instance.boundingBox is the vehicle's WORLD-space AABB.
+        // ... do your thing, e.g. open a window.
+    }
+}
+```
+
+- Only the **local driver** reaches `UseHorn` (it's called from the local
+  `PlayerMoveController`), and `player.AttachedToEntity == __instance`
+  confirms they're actually seated in that vehicle, not a passenger of
+  another.
+- `Entity.boundingBox` (public field) is the world-space AABB — use it for
+  "is the vehicle inside volume X" tests without touching colliders.
+
+### Opening a cursor window from the horn = free input lockout
+
+If your horn handler opens an XUi window that carries `cursor_area="true"`
+(or you `Open(group, _bModal:true)`), the game **stops feeding the vehicle
+any input for as long as the window is up**. `PlayerMoveController.Update`
+early-returns on:
+
+```csharp
+bool flag = !windowManager.IsCursorWindowOpen()
+         && !windowManager.IsModalWindowOpen()
+         && (playerActionsLocal.Enabled || playerActionsLocal.VehicleActions.Enabled);
+// ...later: if (!(bCanControlOverride && flag) && ...) { stopMoving(); return; }
+```
+
+So the moment the window opens: the hardware cursor appears, steering /
+throttle / horn all freeze (`stopMoving()` zeroes `movementInput` each
+frame), and `UseHorn` can't re-fire to reopen the window. Close the window
+and the next frame driving resumes. This is what makes "honk → click a
+menu with the mouse, still seated" work without any manual
+`Cursor.lockState` juggling or input-suppression bookkeeping. The vehicle
+rigidbody physics keeps running while the window is open (only *input* is
+gated), so a moving platform under the car still carries it.
+
+Worked example: Elevator mod — honk while a vehicle is fully pulled into an
+elevator car pops a modal floor picker (`ElevatorHorn.cs` +
+`ElevatorVehicleFloorController`), 2026-07.
+
+---
+
 ## Storage — VehicleInventory and the auto-allocated TileEntity
 
 Vehicles get loot containers for free as long as `LootListAlive` resolves.
@@ -872,6 +1037,88 @@ bool TryPickup(EntityPlayerLocal player)
     return true;
 }
 ```
+
+---
+
+## Custom paint picker + disabling vanilla cosmetics
+
+Pattern for a per-vehicle "Paint" color wheel replacing the vanilla dye
+slot (worked examples: Supra `SupraPaint*`, Oppressor `OppressorPaint*`,
+AssettoCar `AssettoPaint` — see the Assetto Corsa Import note):
+
+- **Radial command**: in the entity class, add
+  `_addCallback(new EntityActivationCommand("mymod_paint", "mymod_paint"))`
+  in `InitLocalActivationCommands`; allow it in `AllowActivationCommand`
+  (`!IsDead()`); open the dialog in `OnEntityActivated`. The icon string
+  resolves to UIAtlas sprite `ui_game_symbol_<icon>` (ship a PNG in
+  `UIAtlases/UIAtlas/`), the label comes from Localization key
+  `entitycommand_<commandId>`.
+- **Dialog**: IMGUI `MonoBehaviour` singleton (`DontDestroyOnLoad`) with
+  an HSV wheel texture, brightness slider, hex field. While open:
+  `player.SetControllable(false)`, force cursor visible/unlocked every
+  `Update`, `Input.ResetInputAxes()`, ESC closes. Persist on close.
+- **Persistence**: colors keyed by `entityId` in a JSON file inside
+  `GameIO.GetSaveGameDir()` — entity ids are only meaningful per save,
+  and the save folder survives mod redeploys (the deployed mod folder
+  does not).
+- **Applying color**: depends on the model. Supra tints the chassis
+  paint material (`Vehicle.mainEmissiveMat`) after neutralizing its baked
+  albedo to white; the Oppressor bakes the color into masked albedo
+  pixels (its `ApplyDyeTint` blue-mask pass). If the apply is a full
+  CPU texture rebake, throttle the poll (~0.2 s) so wheel-dragging
+  previews don't rebuild textures every frame.
+- **Disable vanilla cosmetics** (a dye would fight the custom paint):
+  1. omit `canHaveCosmetic` from the placeable item's `Tags`;
+  2. hide the modify-window dye row with a Harmony postfix on the
+     `XUiC_VehicleWindowGroup.CurrentVehicleEntity` setter:
+     `__instance.cosmeticGrid.ViewComponent.IsVisible = !(value is MyEntity);`
+- If the paint material's `_Color` is the carrier (Supra-style), also
+  postfix `Vehicle.SetColors` to re-assert the saved color — the engine
+  stomps `_Color` white on spawn/load and on every seat enter/exit.
+  Texture-baked approaches (Oppressor) don't need this.
+
+---
+
+## Placement — spawning a vehicle from the placeable item
+
+Vanilla placement (`ItemActionSpawnVehicle.CalcSpawnPosition`) never
+inspects the voxel grid. If you write a custom spawn action, mirror it —
+**do not** gate placement on `world.GetBlock(...)` solidity tests:
+
+- `Block.shape.IsSolidSpace` is **false for smooth-terrain voxels**, so a
+  "hit block must be solid" check rejects ordinary ground (dirt, roads,
+  stone) while accepting oddballs like grass decoration blocks. Symptom:
+  "can only place the vehicle on grass".
+- Vanilla instead raycasts and uses the raw physics hit point, which
+  works on smooth terrain, slopes, and block tops alike:
+
+```csharp
+// layer mask 8454144 (terrain + chunk colliders), hit mask 69
+if (!Voxel.Raycast(world, player.GetLookRay(), dist + 1.5f, 8454144, 69, 0f))
+    return false;
+Vector3 hitPos = Voxel.voxelRayHitInfo.hit.pos;
+```
+
+- Validity = hit point in range, `world.CanPlaceBlockAt(new Vector3i(hitPos),
+  world.GetGameManager().GetPersistentLocalPlayer())` (land claim /
+  trader protection), and a clearance scan: sweep `Physics.Raycast` rays
+  through the vehicle's bounding box (`VehicleSize` from the item XML,
+  e.g. motorcycle `1.3, 1.9, 3`) against collider mask `28901376`, in
+  Origin-local space. Vanilla retries the box at vertical offsets
+  `0.14 … 1.14` in `0.25` steps so uneven ground still finds room.
+- Vanilla spawns the entity at `hitPos + 0.25f * Vector3.up` and lets
+  physics settle it; a kinematic/scripted vehicle should instead spawn
+  (and preview) at its **settled** height. Watch the off-by-one: if the
+  vehicle's soft floor is `World.GetHeight(x,z) + hoverOffset`, the
+  settled pivot is `surface + (hoverOffset - 1)` because `GetHeight`
+  returns the block *below* the walkable surface — but the raycast
+  `hit.pos` here IS the surface. Adding the full `hoverOffset` to
+  `hit.pos` previews/spawns the vehicle a whole block higher than it
+  settles (the Oppressor uses `RestingHoverOffset - 1f`).
+
+Worked example: `SpawnOppressor.TryComputePlacement` (Oppressor mod),
+fixed 2026-07 after the voxel-solidity version made normal terrain
+unplaceable.
 
 ---
 
@@ -1041,7 +1288,11 @@ vehicles:
 | Rider stuck inside the ground on dismount | All `seat.exit` candidates are blocked. Add an "above" exit (`0,1.5,0`) |
 | WASD does nothing while riding | Route A vehicle with no `motor*` or `force*` entries, OR Route B vehicle whose `OnUpdateLive` returns before the input handler runs |
 | Bike falls under gravity when nobody's on it | Custom prefab with no `useGravity = false` on the synthesized rigidbody |
+<<<<<<< Updated upstream
 | Windows/glass render opaque white (or dye colors the wrong part) | `VehiclePart.SetColors` stomped material slot 0 of the first renderer under the `paint` transform with the tint (white when undyed). Put the car-paint material at slot 0 and author its color in the albedo texture with white `_Color` — see the paint/dye contract above |
+=======
+| Placeable item only places on grass / odd blocks, not normal ground | Custom spawn action gates on `Block.shape.IsSolidSpace`, which smooth terrain fails. Use the vanilla raycast + physics hit point instead (see **Placement**) |
+>>>>>>> Stashed changes
 
 ---
 

@@ -35,6 +35,73 @@ baseMat.hideFlags = HideFlags.HideAndDontSave;
 Also guard the cache against partial-destroy states — check the shader too, not
 just the material, before reusing: `if (cached != null && cached.shader != null)`.
 
+## `HideAndDontSave` does NOT save a shared material from `GameObjectPool`
+
+A second, unrelated destroyer — and `HideAndDontSave` is no defence, because
+this one calls `Object.Destroy` explicitly rather than relying on the unused-
+asset sweep. It bites whenever a runtime material is reachable from a
+**pooled** GameObject (any block model entity, prop, or entity model).
+
+`GameObjectPool.DestroyObject` sweeps before destroying:
+
+```csharp
+void DestroyObject(GameObject obj) {
+    obj.GetComponentsInChildren(tempRenderers);
+    Utils.CleanupMaterialsOfRenderers(tempRenderers);   // <-- destroys materials
+    UnityEngine.Object.Destroy(obj);
+}
+// Utils.CleanupMaterials: destroys every material where GetInstanceID() < 0
+```
+
+**A negative `GetInstanceID()` is Unity's marker for "created at runtime"**
+(assets loaded from a file get positive IDs). So the heuristic is "any runtime
+material under a pooled object is a per-instance clone that object owns, so
+free it" — correct for the copies Unity auto-makes when something touches
+`Renderer.material`, and catastrophically wrong for a `static` material you
+**share** across instances. Every `new Material(...)` is negative-ID; there is
+no way to opt out, and `hideFlags` is not consulted.
+(`Utils.MarkMaterialAsSafeForManualCleanup` only appends `" (Instance)"` to the
+name — it is *not* read by this path. Don't expect it to help.)
+
+Symptom: destroying **one** instance turns **every other** instance magenta —
+they are all rendering on the same now-destroyed material. Anything that latches
+on `mat != null` (an `EnsureArt`-style init guard) then wedges permanently
+false, so the *next* object built comes up blank/white instead of magenta. Two
+different-looking symptoms, one cause. Timing is effectively immediate: a fresh
+`PoolItem` has `updateTime = 0`, so the next `FrameUpdate` shrinks the pool and
+destroys the clone a frame or two after the block is removed — no 10s wait.
+
+Fix (Elevator `src/ElevatorPanelModel.cs`, `Patch_GameObjectPool_DestroyObject`):
+exempt your own model by name and destroy it without the sweep.
+
+```csharp
+[HarmonyPatch(typeof(GameObjectPool), "DestroyObject")]
+public static class Patch_GameObjectPool_DestroyObject {
+    public static bool Prefix(GameObject obj) {
+        if (obj == null || obj.name != MyModel.ModelName) return true;
+        Object.Destroy(obj);   // shared art set outlives every clone by design
+        return false;
+    }
+}
+```
+
+Matching on `obj.name` is exact, not a guess: the pool is keyed by `modelName`
+(`BlockShapeModelEntity.Init` → `AddPooledObject(modelName, …)`),
+`PoolItem.Instantiate` stamps `gameObject.name = name` on every clone, and
+`PoolObject` only accepts an object whose name resolves to a `PoolItem`.
+
+Safe because a clone shares its meshes *and* materials with the prefab
+(`Instantiate` copies references, not assets) — there is nothing instance-owned
+to free. The alternative (give every clone its own material copies, complying
+with the engine's assumption) costs batching and needs a hook on all three
+clone paths (pool, placement preview, mover proxy) — prefer the exemption.
+
+`GameObjectPool.DestroyObject` is the **only** call site that can reach a
+block's renderers; the other `Utils.CleanupMaterials*` callers are
+`CharacterConstructUIController`, `GearBoneMap`, `SelectionBox`,
+`TemporaryObject` and `VoxelMeshTerrain`. So plain `Object.Destroy` paths (the
+held-item preview, a mover's proxy clone) are safe and need no patch.
+
 ## Particle material from a known additive shader (don't borrow scene materials)
 
 To get an additive particle material, build from a named shader rather than
@@ -369,6 +436,48 @@ the goggles slide down; only at slide-end (goggles fully down + blackout at max)
 does `ActivateFpvView` run, then the crossfade dissolves the goggles into the live
 feed. Reference: FPV `src/FPVDroneManager.cs` (`BeginGogglesIntro`,
 `UpdateGogglesIntro`, `DrawGogglesIntro`, `EaseOutBack`).
+
+## Wireframe line meshes are stuck at 1px — thicken with crossed quads
+
+A debug/edit wireframe drawn as a `Mesh` with `MeshTopology.Lines` (or
+`LineStrip`) always rasterises **exactly 1 pixel wide** — there is no width
+knob anywhere (material, renderer, or mesh). To make such lines thicker,
+rebuild each segment as **two crossed quads** (a `+` cross-section) with a
+small world-space half-width, using `MeshTopology.Quads`. For axis-aligned
+edges the two perpendicular extrusion axes come from
+`Vector3.Cross(dir, Vector3.up)` (falling back to `Vector3.right` for vertical
+edges) and `Vector3.Cross(dir, a)`. With `_Cull Off` on the material
+(`Hidden/Internal-Colored`, see the laser section) the cross reads as a solid
+thick line from every angle — no billboarding needed, so a static mesh works
+and nothing is rebuilt per frame. Verts go 2 → 8 per dash, so set
+`mesh.indexFormat = IndexFormat.UInt32` if boxes can get big. Note the
+thickness is world-space (thins with distance), unlike the constant-1px line
+topology. Reference: Elevator `src/ElevatorBoundsRenderer.cs`
+(`AddThickDashedEdge`; the green floor boxes still use the 1px line path in
+`AddDashedBox`).
+
+## Dot-matrix LED displays: one vertex-coloured mesh, not N GameObjects
+
+To render a dot-matrix readout (elevator floor indicator, scoreboard, etc.)
+don't spawn a GameObject per LED — build **one mesh with a small quad per
+cell** and pick each dot's colour via **`mesh.colors32` vertex colours**.
+`Sprites/Default` multiplies vertex colour × texture on a plain
+`MeshRenderer`, so lit (bright) and off (faint dark) dots share one material
+and one draw call; set the material colour to white and let the verts carry
+the tint. Two supporting tricks:
+
+- **Dot sprite**: a procedural radial-falloff `Texture2D` (solid core,
+  alpha→0 at the quad edge, squared to ease the rim). The *same* texture on a
+  ~2× larger quad with low-alpha vertex colour doubles as a bloom halo under
+  each lit dot.
+- **Layering inside one transparent mesh**: triangles of the same material
+  render **in index order**, so append all halo quads first and all dot cores
+  after — the cores draw crisply on top of the blur with no extra render
+  queue or second material.
+
+Glyphs are easiest as 5×7 `string[]` bitmaps (`".###."` rows) stamped into a
+`bool[cols, rows]` grid, then swept into the mesh. Reference: Elevator
+`src/ElevatorPanelView.cs` (`MakeDotDisplay`, `MakeDotTexture`, `Glyphs`).
 
 ## World → scene space
 

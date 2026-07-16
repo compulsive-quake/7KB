@@ -8,6 +8,8 @@ Part of the [7DTD Modding Knowledgebase](README.md). Covers the block paint syst
 
 7DTD has a paint system that lets players apply surface textures to blocks. Each face of a block can be painted independently. Paint textures are referenced by integer IDs — **not** by arbitrary RGB colors.
 
+> For recoloring an *entity's* textures at runtime (vehicle repaint from a color picker), see [Runtime Texture Tinting (entity repaint)](Runtime%20Texture%20Tinting%20(entity%20repaint).md) — a completely different mechanism.
+
 ---
 
 ## Applying Paint from C#

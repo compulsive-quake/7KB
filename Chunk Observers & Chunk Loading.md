@@ -63,6 +63,16 @@ trails the flight. Fix: **lead the observer along the velocity vector** (FPV
 mod leads by 2 s of horizontal velocity, capped at 64 m) and consider +2
 viewDim over the video option since the whole bubble is in frame from altitude.
 
+Working ground-vehicle implementation: Supra `src/SupraChunkPreloader.cs` —
+extra observer while the local player drives (2 s lead capped at 96 m = 6
+chunks for the ~69 m/s top speed), `viewDim = Utils.FastMin(12,
+GameUtils.GetViewDistance())` (vanilla's own local-player clamp), removed on
+dismount, rebuilt if the video option changes, skipped when not
+`ConnectionManager.IsServer`. Motivation: road-decoration wrecks only appear
+once their chunk is decorated + meshed, so at speed they pop in too close to
+dodge; vanilla's only knob is View Distance (Options → Video), which just
+widens the player-centered bubble.
+
 ## Debugging chunk loading
 
 - Vanilla console command `chunkobserver` (alias `co`):

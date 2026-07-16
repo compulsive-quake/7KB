@@ -103,3 +103,4 @@ function cycleRotation(currentRot, allowedRots, forward) {
 - [[Rotation Types]] — per-block rotation constraints
 - [[Multi-Block Rotation]] — how rotation affects multi-block dimensions
 - [[X-Mirror Rotation]] — rotation correction for mirrored prefabs
+- [[Moving Blocks at Runtime (SetBlocksRPC)]] — rotating a whole moved volume in 90° steps (composition, `Block.SupportsRotation`, `BlockShapeNew.GetRotationStatic`)

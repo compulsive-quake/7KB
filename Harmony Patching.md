@@ -157,6 +157,27 @@ public static class MyPatch
 }
 ```
 
+### Overloads: patch the workhorse, not a forwarder
+
+When a method has several overloads, vanilla usually implements one "workhorse"
+overload and the rest are one-line forwarders into it. Patch the workhorse:
+
+- Every call path funnels through it, so one patch covers all overloads.
+- Tiny forwarders can be **inlined by Mono's JIT into callers**, which silently
+  bypasses a detour placed on the forwarder. Big methods are never inlined.
+- A `TargetMethod()` that returns "first overload whose first param matches" is
+  a trap — reflection order tends to hand back the forwarder.
+
+Concrete case (3.0.x): `EntityBuffs.AddBuff(string, int, bool, bool, float)` is a
+one-liner forwarding to `EntityBuffs.AddBuff(string, Vector3i, int, bool, bool, float)`
+where all the logic lives; `MinEventActionAddBuff` (the effect-group action behind
+bleeding/infection/stun) calls the forwarder. zPhone's "No Status Change" patch on
+the forwarder never fired in gameplay. Fix: select the **largest** string-first
+overload in `TargetMethod()` (survives TFP adding parameters, always lands on the
+workhorse). Same caution appears in zPhone's `GodMasterKey` patches: one-line getters
+like `TEFeatureLockable.IsLocked()` may be inlined into callers, so back them up by
+also patching a bigger method on the same deny path (`IsUserAllowed`).
+
 ---
 
 ## Accessing Private Fields
@@ -325,6 +346,54 @@ public static class Patch_TypeGetType
 > **Warning:** `Assembly.GetType()` does NOT accept assembly-qualified names like `"MyBlock, MyMod"` — you must strip the assembly part first. Also, if your classes are in a namespace, `asm.GetType("MyBlock")` won't find `MyNamespace.MyBlock` — you need to search by short name as a fallback.
 
 Patch all three overloads: `GetType(string)`, `GetType(string, bool)`, `GetType(string, bool, bool)`.
+
+---
+
+## Suppressing a Vanilla Keybind (InControl read-side patch)
+
+When a mod hotkey collides with a vanilla binding (e.g. zPhone's Shift+Z vs
+`SelectionSet`, whose default binding is plain Z), don't try to "eat" the key
+in a MonoBehaviour Update — the vanilla consumer may read the key earlier in
+the same frame (script execution order is undefined). Instead suppress on the
+**read side** with a postfix on the InControl getter (verified working, zPhone
+2026-07):
+
+```csharp
+using InControl;   // csproj: reference <ManagedDir>\InControl.dll
+
+[HarmonyPatch(typeof(OneAxisInputControl), nameof(OneAxisInputControl.IsPressed), MethodType.Getter)]
+public class SelectionSetSuppressPatch
+{
+    static void Postfix(OneAxisInputControl __instance, ref bool __result)
+    {
+        if (__result && MyMod.ShouldSuppress(__instance)) __result = false;
+    }
+}
+```
+
+Facts that make this work (verified against 3.0.x Assembly-CSharp + InControl.dll, 2026-07):
+
+- All game actions are `InControl.PlayerAction : OneAxisInputControl`;
+  `IsPressed` / `WasPressed` / `WasReleased` are **not shadowed**, so patching
+  the base getter intercepts every read. The getters check `EnabledInHierarchy`
+  at read time, so read-side falsification is consistent with InControl's own
+  disable semantics.
+- The local player's action set lives at
+  `Platform.PlatformManager.NativePlatform.Input.PrimaryPlayer`
+  (type `PlayerActionsLocal`). Compare `ReferenceEquals(__instance, thatSet.SomeAction)`
+  to scope the patch to one action — cheap enough for a hot getter.
+- `SelectionSet` (default `Z`) has exactly one consumer:
+  `BlockToolSelection.CheckKeys`, gated by `IsEditMode() || DebugMenuEnabled`.
+  Vanilla already skips it when Ctrl is held (`InputUtils.ControlKeyPressed`)
+  but NOT when Shift is held. It reads `IsPressed` (held state, starts/updates
+  the selection every frame), so the suppression condition must hold for the
+  whole physical key-hold, not just the first frame.
+- Default editor-group bindings for reference: Z=SelectionSet, X=SelectionRotate,
+  L=SelectionFill, J=SelectionClear, Backspace=SelectionDelete, Insert=SelectionMoveMode,
+  K=Prefab, P=DetachCamera (see `PlayerActionsLocal.CreateActions/SetDefaultBindings`).
+- Scope the suppression to the exact physical chord (`Input.GetKey(KeyCode.Z)`
+  + shift held + mod feature armed) so a user who rebinds the vanilla action to
+  another key is unaffected.
 
 ---
 

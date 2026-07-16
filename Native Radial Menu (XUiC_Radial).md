@@ -55,6 +55,18 @@ After `Open()`, `XUiC_Radial.Update()` (which runs even while the window is clos
 
 `PlayerMoveController` calls `holdingPrimary.SetupRadial(playerUI.xui.RadialWindow, entityPlayerLocal)` when the held item reports a radial — so a custom `ItemClass`/holding object can supply wheel entries the "proper" way. But the trigger key is the vanilla radial action, not necessarily R; driving the wheel yourself (above) is simpler when you want a specific key.
 
+## Block activation commands: how tap vs hold dispatches
+
+For a `Block` that returns `HasBlockActivationCommands == true`, you do **not** manage the wheel — `PlayerMoveController` (~line 2269) always calls `RadialWindow.Open()` + `SetCurrentBlockData(...)` on activate, and `XUiC_Radial` decides tap vs hold by timing. The rules that matter when designing a block's E-interaction:
+
+- **Tap** (Activate released *before* the 0.25 s `displayDelay`) runs the **first enabled command** — `Update()` sets `selectedIndex` to the first `menuItemState[i]==true` and fires it. It does **not** call the parameterless `OnBlockActivated(world,pos,bv,player)` override; that override is only a fallback the base string-overload forwards to.
+- **Hold** (held past 0.25 s) opens the visible wheel; releasing over a wedge runs that command.
+- **Exactly one enabled command** → `SetCommonData` sees `num==1` and calls `CallContextAction()` **immediately on press** (no wheel, no tap/hold distinction). So a single command can't give you "tap does A, hold shows a menu".
+
+**Design consequence:** to make *tap = action A* and *hold = a menu that includes B*, you need **≥2 enabled commands with A first**, because a tap always fires `commands[0]`. You cannot have tap ride/act while the wheel shows only "Settings" — the tapped command and the wheel entries are the same `GetBlockActivationCommands` list. (Elevator mod: panel keeps `elevator_floors` first so a tap rides the aimed floor button, and `elevator_settings` second, reachable only from the hold wheel; riding is button-only, there is no separate floor-list window.)
+
+Displayed wedge label = `Localization.Get("blockcommand_" + command.text)`; icon = `ui_game_symbol_{command.icon}`.
+
 ## Version gotcha — 2026-06-29 explosion API change
 
 The 2026-06-29 game build changed `GameManager.ExplosionServer`: it **dropped the leading `int clrIdx` argument** (now 8 params: `Vector3 worldPos, Vector3i blockPos, Quaternion rotation, ExplosionData data, int entityId, float delay, bool removeBlockAtExpl, ItemValue source = null`). Correspondingly `HitInfoDetails.clrIdx` was removed. Mods calling the old 9-arg overload throw `MissingMethodException` at detonation after updating. Drop the `clrIdx` arg and stop reading `hit.clrIdx`.

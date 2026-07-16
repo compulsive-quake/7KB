@@ -59,8 +59,14 @@ A new global setting touches, in order: `Settings` struct in `src-tauri/src/sett
 
 ## Beta feature toggles
 
+<<<<<<< Updated upstream
 - Settings has a `Beta` tab (before Updates in `SettingsPanel.tsx`) that collects experimental feature toggles. Beta toggles default to enabled (`bool_default_true`) so existing behavior is unchanged until a user opts out.
 - `sketchfab_assets_enabled` / `sketchfabAssetsEnabled`: gates the Sketchfab Assets toolbar button (`Toolbar.tsx`) and the `assets` section route; `App.tsx` bounces `section === "assets"` back to `mods` if the toggle is off so the user is never stranded on a blank pane.
+=======
+- The Settings **Beta** tab holds per-feature on/off switches that hide experimental UI surfaces. Each toggle is a default-true bool (`bool_default_true` in `settings.rs`, read as `settings?.<field> !== false` in the renderer so it stays visible while settings load). Current toggles: `feature_source_control`, `feature_unity_assets`, `feature_sketchfab_assets`.
+- Gating is done at every entry point for the surface, not just one: Source Control and Unity Assets are left activity-rail panels, so gate BOTH the `ActivityBar.tsx` button AND `SidePanel.tsx` (return null when the open `sidePanel` kind is disabled, since it can be restored from persisted UI state). Sketchfab Assets is a top-right toolbar section, so gate the `Toolbar.tsx` `SectionIconButton` AND add an `App.tsx` effect that redirects `section` back to `"mods"` if the feature is switched off while that section is open.
+- Toggles hide surfaces only; they never delete data or force-close already-open tabs (e.g. an open Unity prefab tab survives disabling Unity Assets). Re-enabling restores the button immediately.
+>>>>>>> Stashed changes
 
 ## Installed mod manager
 

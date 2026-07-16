@@ -1,0 +1,72 @@
+# ModForge Deploy & Drift Tracking
+
+Part of the [7DTD Modding Knowledgebase](README.md). How modman decides what a
+deploy needs (game shutdown or not) and the failure modes when that tracking
+goes wrong. Learned debugging a "deploy script is not working" report on the
+Elevator mod (2026-07).
+
+## The kind counters drive the shutdown preflight
+
+`.modforge-state.json` holds three monotonic counters (`restart` / `xui` /
+`assets`). Deploy status = source counters vs the copy of the state file in
+the deployed folder. Two writers bump them:
+
+- **modman's source watcher** (`source_watch.rs` → `deploy_status::classify_in_mod`),
+  live fs events;
+- **the per-mod Claude Stop hook** (`.claude/modforge-bump-id.cjs`), a
+  git-status-based safety net at end of each Claude turn.
+
+The deploy modal **skips the game-shutdown preflight when only `xui`/`assets`
+drift is pending**. That makes misclassification dangerous, not just cosmetic.
+
+## Failure mode: deploy fails with robocopy exit 8/9 while the game runs
+
+A loaded mod DLL is **memory-mapped** by the running game. Overwriting it
+fails with Windows error **1224 "user-mapped section open"** — note a plain
+`[IO.File]::Open(path, 'Open', 'ReadWrite', 'None')` **succeeds** on such a
+file, so an open-for-write probe is NOT a valid lock test; only the actual
+overwrite fails. robocopy retries then reports exit ≥ 8 (9 = "some copied,
+some failed") and `deploy.ps1` throws.
+
+So: if code changed but the drift shows `assets`-only, modman deploys without
+shutting the game down → robocopy hits 1224 on the DLL → deploy "doesn't
+work". Fix the tracking, or shut the game down (`mcp__modman__shutdown_game`)
+before deploying.
+
+## Failure mode: Stop hook can't find git → everything becomes `assets`
+
+Hook processes spawned from the modman GUI can carry a minimal `PATH` where a
+bare `git` (or `node`) doesn't resolve. The original hook swallowed the error
+and bumped `assets` as the "least disruptive" fallback — which is exactly
+wrong for `.cs` changes, because it lets the deploy skip the game shutdown
+(see above). Symptom signature: `assets` counter +1 per Claude turn while
+`restart` never moves despite `.cs` edits.
+
+Hardened hook (Elevator's `.claude/modforge-bump-id.cjs`, worth porting to
+the modman template):
+
+- try `git`, then `C:\Program Files\Git\cmd\git.exe` / `bin\git.exe`;
+- on total failure, write the reason + `PATH` to
+  `.claude/modforge-bump-id.log` and bump **restart** (over-flagging costs
+  one unnecessary restart; under-flagging breaks deploys);
+- git OK + clean tree → bump nothing (previously bumped `assets` for every
+  no-change turn).
+
+## Reproducing a modforge deploy outside modman
+
+`deploy.rs` runs `powershell.exe -NoProfile -NonInteractive -ExecutionPolicy
+Bypass -File deploy.ps1` with cwd = mod root and env injected: `GameDir`,
+`SEVEN_DTD_CLIENT`, `MODFORGE_MOD_DIR`, `MODFORGE_MOD_NAME`, `MODFORGE_MOD_ID`,
+`MODMAN_MCP_URL`/`MODMAN_MCP_TOKEN`. Deploy output streams to the UI only —
+there is no log file — so to see a script error, run the script with those
+env vars set. On this machine the game is at
+`D:\SteamLibrary\steamapps\common\7 Days To Die` (NOT the `C:\Program Files
+(x86)` default the scripts fall back to).
+
+## Open modman issues spotted (2026-07)
+
+- The source watcher did not bump `restart` for `.cs` edits during a live
+  session (counters only moved via the Stop hook fallback) — why the watcher
+  missed the events is unverified; the Rust classifier itself is correct.
+- The deploy flow could detect robocopy 1224/exit≥8 on a `.dll` and offer
+  "shut down the game and retry" instead of failing.

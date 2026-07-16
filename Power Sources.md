@@ -169,6 +169,76 @@ bool isRunning = (blockValue.meta & 2) != 0;
 | `HandlePowerReceived(ref ushort)` | `PowerItem` | Called when a consumer receives power |
 | `SendHasLocalChangesToRoot()` | `PowerItem` | Propagates state changes up the power tree |
 
+### Forcing a light block on/off at runtime (no wiring)
+
+Verified in zPhone (`GodLightFollow` / `GodLightSwitch`). Vanilla has THREE kinds of
+light blocks, with different lit-state storage — picking the wrong path is a
+silent no-op:
+
+1. **`BlockLight` fixtures** (LED panels like `lightPanelLEDWhite`, POI ceiling
+   lights — anything with `TileEntityLight`): lit state is **`meta` bit 2**
+   (`BlockLight.cMetaOn = 2`; bit 0 is `cMetaOriginalState`, the POI's original
+   state). The TE stores only color/intensity/range — it has NO on/off flag, so
+   flipping TE flags does nothing. Call the game's own toggle, which flips meta,
+   syncs via `SetBlockRPC`, AND drives the Unity `LightLOD`/emissive visuals:
+   ```csharp
+   var bl = bv.Block as BlockLight;
+   if (bl != null && bl.IsLightOn(bv) != wantedOn)
+       bl.updateLightState(world, pos, bv, true, false); // _bSwitchLight flips
+   ```
+   `updateLightState`/`IsLightOn` are `[PublicizedFrom(private)]` → public in the
+   shipped assembly, callable directly. Vanilla only exposes this toggle in the
+   *editor* ("light" activation command) — in-game E does nothing, which is why a
+   mod hook is needed at all. Needs the chunk's `BlockEntityData` transform to be
+   displayed (returns false otherwise).
+2. **Powered lights** (`BlockPoweredLight` + `TileEntityPoweredLight`): visuals are
+   driven by `IsTriggered`/`IsActive`/`IsPowered` — set them on **both** the tile
+   entity and its `PowerItem`, then call `PowerItem.SendHasLocalChangesToRoot()`
+   and `TileEntity.SetModified()`. `IsPowered` is server-derived, so writing it
+   locally is usually a no-op but harmless. To *read* the current state, check
+   `PowerItem.IsTriggered`/`IsActive` first, then the TE's own flags.
+3. **Standalone torches / candles / lanterns** (no tile entity): lit state is
+   **`BlockValue.meta` bit 0**. Flip the bit and write back with
+   `world.SetBlockRPC(new BlockValueRef(pos), bv)`.
+
+Heuristic block matching: check both `block.GetType().Name` and
+`block.GetBlockName()` for `light` / `lamp` / `torch` / `candle` (case-insensitive)
+— covers all three plus third-party blocks with no special class.
+
+**Finding the block under the crosshair**: prefer `player.HitInfo` (the game's
+per-frame focus hit; check `bHitValid` + `GameUtils.IsBlockOrTerrain(tag)`, use
+`hit.blockPos`) over a bullet-path `Voxel.Raycast` — most light fixtures have no
+bullet collision, so the bullet mask sails through them and hits the wall behind.
+For hits beyond focus range use `Voxel.Raycast(world, ray, dist, false, true)`
+(the bool overload; `bHitNotCollidableBlocks: true` catches decor). Resolve
+multi-block children first: `if (bv.ischild) { pos += bv.parent; bv = world.GetBlock(pos); }`.
+
+### Light prefab clones default to LIT (proxy/preview gotcha)
+
+Verified in Elevator (moving-car proxy). Instantiating a light block's model
+outside the chunk pipeline — e.g. `ItemClassBlock.CreateMesh(..., MeshPurpose.Local, ...)`
+for a falling-block-style proxy — wakes its `LightLOD`s in the prefab's
+serialized default state, which is usually **on**. The real on/off state is
+only picked up in `LightLOD.CheckInitialBlock`, and only when a
+`BlockEntityData` was wired in via `SetBlockEntityData` (the chunk does this
+for placed blocks); with `bed == null` the clone keeps the prefab default, so
+an off light shines on the clone.
+
+Fix pattern:
+- **Read ground truth from the live entity** before it's destroyed:
+  `((Chunk)world.GetChunkFromWorldPos(pos)).GetBlockEntity(pos)` →
+  `bed.transform.GetComponentsInChildren<LightLOD>(true)` → record each
+  `bSwitchedOn` (public field). This works for all three light kinds above —
+  it's whatever state the player currently sees, regardless of which system
+  drives it.
+- **Stamp the clone**: same `GetComponentsInChildren<LightLOD>(true)` on the
+  clone (same prefab → same component order), call
+  `lod.SwitchOnOff(state, _ignoreToggle: true)`. `SwitchOnOff` only sets
+  `bSwitchedOn`; `LightLOD.FrameUpdate` (driven by `GameLightManager`, which
+  the clone registered with in `OnEnable`) applies it every frame to the
+  `Light`, emissive materials, `LitRootObject` (flames) and audio — so one
+  flag covers all the visuals.
+
 ---
 
 ## Custom UI for Power Sources

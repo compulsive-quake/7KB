@@ -39,6 +39,11 @@ mod's Betaflight startup melody (`betaflight_startup.mp3` →
 ## Applies when
 Any mod that wants recorded audio without an asset-bundle round-trip. Same
 runtime-`AudioClip` path the FPV mod already uses for its synthesized rotor
+<<<<<<< Updated upstream
 sounds — this just fills the buffer from a file instead of a synth. For the
 synth side (RPM→pitch model, anti-rasp spectral tuning), see
 [Synthesized Drone Rotor Audio](<Synthesized Drone Rotor Audio.md>).
+=======
+sounds ([[Procedural Engine-Rotor Loop Synthesis]]) — this just fills the buffer
+from a file instead of a synth.
+>>>>>>> Stashed changes

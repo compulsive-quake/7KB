@@ -124,6 +124,7 @@ single `Data/Config/XUi/` folder is gone), but mods still ship their own `Config
 
 This is an XUi-only change → hot-reloadable (`xui reload`), no DLL rebuild or game restart.
 
+<<<<<<< Updated upstream
 ## Localization: `Config/Localization.txt` → `Config/Localization.csv`
 
 3.0.0 renamed the per-mod localization file. `Localization.LoadPatchDictionaries`
@@ -133,6 +134,71 @@ Rename (or ship both for 2.x compat) and **restart** the game — mod localizati
 only loaded at startup (`ModManager.LoadLocalizations` bails when `_isLoadingInGame`).
 Column mapping is by header name, so old headers without 3.0.0's `KeepLoaded` column
 still work. Details in [Localization](Localization.md).
+=======
+## Block activation methods also lost `_cIdx` (and the `_interaction` string)
+
+The `Block` activation surface dropped the cluster-index parameter in 3.0.0 (same
+cleanup as the `World` methods above). Current signatures (reflection-verified,
+Elevator mod 2026-07):
+
+```csharp
+bool  OnBlockActivated(WorldBase _world, Vector3i _blockPos, BlockValue _blockValue, EntityPlayerLocal _player)
+bool  OnBlockActivated(string _commandName, WorldBase _world, Vector3i _blockPos, BlockValue _blockValue, EntityPlayerLocal _player)
+bool  HasBlockActivationCommands(WorldBase _world, BlockValue _blockValue, Vector3i _blockPos, EntityAlive _entityFocusing)
+BlockActivationCommand[] GetBlockActivationCommands(WorldBase _world, BlockValue _blockValue, Vector3i _blockPos, EntityAlive _entityFocusing)
+string GetActivationText(WorldBase _world, BlockValue _blockValue, Vector3i _blockPos, EntityAlive _entityFocusing)
+```
+
+Note the old 2.x `OnBlockActivated(string _interaction, WorldBase, int _cIdx, ...)`
+form (still visible in older mods like SentryLight) no longer overrides anything —
+copying signatures from an un-migrated sibling mod produces methods that silently
+never get called. Reflect on the current assembly instead.
+
+## Block lifecycle signatures (3.0, reflection-verified)
+
+`OnBlockAdded` gained a trailing `PlatformUserIdentifierAbs`; the other two are
+unchanged (verified against the 3.0 assembly, Elevator mod 2026-07):
+
+```csharp
+void OnBlockAdded(WorldBase _world, Chunk _chunk, Vector3i _blockPos, BlockValue _blockValue, PlatformUserIdentifierAbs _addedByPlayer)
+void OnBlockRemoved(WorldBase _world, Chunk _chunk, Vector3i _blockPos, BlockValue _blockValue)
+void OnBlockUnloaded(WorldBase _world, Vector3i _blockPos, BlockValue _blockValue)
+```
+
+Gotchas when overriding `OnBlockRemoved` to clean up per-block mod data:
+
+- It fires for **every** air-set, including your own `SetBlocksRPC` batches. A mod
+  that moves blocks (like the Elevator car) must guard with "is this position part
+  of my own move?" or it deletes its data mid-move.
+- Check `_blockValue.ischild` and only act on the master of a multiblock.
+- Chunk unload is `OnBlockUnloaded`, not `OnBlockRemoved` — unload must NOT drop
+  persistent data.
+
+## `GameManager.ShowTooltip` is static now
+
+`GameManager.Instance.ShowTooltip(...)` → CS0176. Call it as
+`GameManager.ShowTooltip(EntityPlayerLocal _player, string _text, bool _showImmediately, bool _pinTooltip, float _timeout)`.
+
+## `Chunk.RemoveTileEntityAt` is generic
+
+`chunk.RemoveTileEntityAt(world, localPos)` no longer infers —
+use `chunk.RemoveTileEntityAt<TileEntity>(world, localPos)`.
+
+## `ModEvents` handlers take typed ref-struct data
+
+Every `ModEvents` event is a `ModEvent<TData>` whose handler signature is
+`void Handler(ref ModEvents.S<Name>Data _data)`:
+
+```csharp
+ModEvents.GameStartDone.RegisterHandler(OnGameStartDone);
+static void OnGameStartDone(ref ModEvents.SGameStartDoneData _data) { ... }
+```
+
+Also new and very useful: **`ModEvents.UnityUpdate`** fires every Unity frame —
+per-frame input polling / timers from a plain static class, no MonoBehaviour or
+Harmony patch needed. Guard on `GameManager.Instance?.World != null` since it also
+fires in the main menu.
+>>>>>>> Stashed changes
 
 ## Migration checklist
 

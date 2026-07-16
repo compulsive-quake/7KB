@@ -181,7 +181,14 @@ Common useful commands:
 - `listplayers` — list connected players
 - `gettime` — current game time
 - `settempunit f/c` — set temperature unit
-- `debugmenu` — toggle debug menu
+- `debugmenu` — toggle debug menu. Gate for the vanilla debug hotkeys: the
+  Q god-mode toggle (and the other admin keys) are NGUI actions whose
+  enabled-delegate checks `GamePrefs.GetBool(EnumGamePrefs.DebugMenuEnabled)`
+  (see `PlayerMoveController` in 3.0.x). If "pressing Q stopped toggling god
+  mode", the debug menu pref is off — nothing is wrong with the keybind. Note
+  zPhone's God app persists this pref (`godDebugMenuEnabled` in its
+  `ZPhoneConfig.json`) and re-applies it at startup and every `XUi.Init`, so a
+  persisted `false` there wins over `dm` enabled in a previous session.
 - `spawnairdrop` — spawn an airdrop
 - `spawnentity <id> <x> <y> <z>` — spawn entity at position
 - `give <item> <count>` — give items to player

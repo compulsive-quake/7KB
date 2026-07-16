@@ -75,6 +75,7 @@ Part of the [7DTD Modding Knowledgebase](README.md). Covers folder layout, ModIn
   - `UnityEngine.CoreModule.dll`
   - `UnityEngine.ImageConversionModule.dll` — for `Texture2D.LoadImage`
   - `UnityEngine.InputLegacyModule.dll` — **required for the legacy `Input` class** (`Input.GetKey`, `Input.GetKeyDown`, etc.). Modern Unity splits `Input` out of CoreModule into this module; `KeyCode` resolves from CoreModule but `Input` does **not**. Without this reference you get `CS0103: The name 'Input' does not exist in the current context`.
+<<<<<<< Updated upstream
   - `LogLibrary.dll` — **defines the `Log` class** (`Log.Out`/`Log.Warning`/`Log.Error`). `Log` is *not* in `Assembly-CSharp`; without this reference you get `CS0103: The name 'Log' does not exist in the current context`.
   - `UnityEngine.IMGUIModule.dll` — **required for a legacy `OnGUI` overlay** (`GUI`, `GUIStyle`, `GUI.DrawTexture`, `GUI.Label`, `GUI.Button`). Without it: `CS1069: 'GUIStyle' … forwarded to assembly 'UnityEngine.IMGUIModule'`. See [[IMGUI Tracker Stack]].
   - `UnityEngine.TextRenderingModule.dll` — **required alongside IMGUI for `GUIStyle` text config**: `FontStyle` and `TextAnchor` live here (`CS0012: 'FontStyle'/'TextAnchor' is defined in an assembly that is not referenced … UnityEngine.TextRenderingModule`).
@@ -84,6 +85,15 @@ Part of the [7DTD Modding Knowledgebase](README.md). Covers folder layout, ModIn
 > **Overriding game methods with `ReadOnlySpan<char>` params requires compiling against the game's own BCL.** Since the ~2026-06-29 game update, virtual signatures like `Entity.AllowActivationCommand(ReadOnlySpan<char>, EntityPlayerLocal)` use `ReadOnlySpan<T>`, and `Assembly-CSharp`'s typeref for it points at **Unity's `mscorlib 4.0.0.0`** (not `netstandard`). A `net48` target has no Span at all (CS0234), and a plain `netstandard2.1` target resolves `ReadOnlySpan` from the SDK ref pack's `netstandard.dll` — a *different type identity*, so the override still fails with **CS0115 "no suitable method found to override"**. Fix: keep `<TargetFramework>netstandard2.1</TargetFramework>` but add `<NoStdLib>true</NoStdLib>` + `<DisableImplicitFrameworkReferences>true</DisableImplicitFrameworkReferences>` and reference the game's `mscorlib.dll`, `netstandard.dll`, `System.dll`, `System.Core.dll` from `7DaysToDie_Data\Managed` as `<Reference>` items with `<Private>false</Private>`. Verified with Oppressor (2026-07-09). To check which assembly a typeref points at, read the metadata with `System.Reflection.Metadata` (`PEReader` → `TypeReferences` → `ResolutionScope`) — runtime reflection lies because .NET 8 unifies corlibs on load.
 
 > **`ConsoleCmdAbstract` overrides must be `public`, not `protected`.** Adding a console command from a mod needs no Harmony — `SdtdConsole` finds every `IConsoleCommand` implementor across all loaded assemblies by reflection, so a public class with a parameterless ctor extending `ConsoleCmdAbstract` auto-registers. But the shipped `Assembly-CSharp` is *publicized*: `getCommands`/`getDescription`/`getHelp` carry `[PublicizedFrom(EAccessModifier.Protected)]` and their real metadata is `public`. Decompilers print `protected`, but declaring `protected override` fails with **CS0507 "cannot change access modifiers when overriding"** — use `public override`. Commands are typed in the F1 console without a leading slash. See [[Map Fog & Reveal]].
+=======
+  - `UnityEngine.AnimationModule.dll` — for `Animator` (e.g. stamping door
+    animator state). General rule: `UnityEngine.dll` is only a **facade** that
+    type-forwards to the per-feature module DLLs; the compiler error
+    `CS1069: The type name 'X' could not be found in the namespace
+    'UnityEngine'. This type has been forwarded to assembly '...Module'`
+    names the exact module DLL to add from `Managed/` (reference it with
+    `<Private>false</Private>` like the others).
+>>>>>>> Stashed changes
 
 > **Numpad / NumLock gotcha:** On Windows, when NumLock is **off** the numeric keypad does not emit `KeyCode.Keypad*` at all — the OS sends the navigation keys instead (numpad 8→`UpArrow`, 2→`DownArrow`, 4→`LeftArrow`, 6→`RightArrow`, 9→`PageUp`, 7→`Home`, 1→`End`, 3→`PageDown`, 0→`Insert`, `.`→`Delete`; numpad 5 sends `VK_CLEAR`, which has no usable Unity `KeyCode`). So `Input.GetKeyDown(KeyCode.Keypad6)` silently never fires for a user with NumLock off — no error, key just does nothing. Symptom: "the numpad controls don't work." Fix: accept both the `Keypad*` code and its nav-key alias for each binding, and never use `Keypad5` as a modifier (pick `LeftShift`/`RightShift` instead). Airstrike's designator laser-origin tuner (`AirstrikeLaserOrigin.HandleAdjustInput`) does this.
 
@@ -147,6 +157,19 @@ Translation strings live in `Config/Localization.txt`. See [[Localization]].
 
 ---
 
+## Custom UI Sprites (UIAtlases)
+
+A mod can ship XUi sprites without an asset bundle: every PNG dropped in
+`UIAtlases/UIAtlas/<name>.png` is loaded at startup into the in-game `UIAtlas`
+as a sprite named `<name>`, usable directly as `sprite="<name>"` in XUi XML.
+Plain quads — no slicing metadata, so `type="sliced"` only makes sense for
+sprites drawn with uniform borders. New/changed PNGs are **xui-reload kind**
+(no restart). The Elevator mod generates its panel art deterministically with
+`tools/gen_ui_sprites.ps1` (run under Windows PowerShell 5.1, not pwsh —
+System.Drawing).
+
+---
+
 ## Build & Deploy
 
 See `build.ps1` in the project root. After any code or XML change, always run:
@@ -186,6 +209,16 @@ Project files can support the same convention by accepting `GameDir`, `SevenDays
 > dotnet build src/FPV.csproj -c Release "-p:GameDir=D:\SteamLibrary\steamapps\common\7 Days To Die"
 > ```
 > (Find it from `steamapps/libraryfolders.vdf`, or just check for `<lib>/steamapps/common/7 Days To Die/7DaysToDie_Data/Managed/Assembly-CSharp.dll`.) modman's own deploy build already knows the right path; this only bites local command-line builds.
+
+> **Stale second install produces misleading CS0115 errors.** This workstation
+> also has an **older copy at `D:\7 Days To Die`** (not the Steam library one).
+> Building — or `ilspycmd`-decompiling — against it resolves references fine
+> but the old `Block` virtual signatures don't match, so long-stable files
+> fail with `CS0115: no suitable method found to override`
+> (`OnBlockActivated`, `GetBlockActivationCommands`, …). The errors look like
+> a code regression; the real cause is the wrong Assembly-CSharp. The live
+> install is `D:\SteamLibrary\steamapps\common\7 Days To Die` (2026-07;
+> confirm against `mcp__modman__status`'s `deployedPath`).
 
 ### Mod Gitignore Unity Entries
 

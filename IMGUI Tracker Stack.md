@@ -391,6 +391,18 @@ users can't even tell it's a slider. For any user-facing panel:
 - Unicode glyphs proven to render in the game font (used in FPV): `▶ − + × …`. Fancier
   glyphs (⚙ ↺ ⌨) are unverified and may render as boxes — test before shipping.
 
+### Layering two IMGUI scripts (GUI.depth)
+
+When two separate MonoBehaviours both draw in `OnGUI` (e.g. a modal dialog with a
+full-screen dim + a HUD widget that should stay visible on top of the dim), their
+relative draw order is undefined unless you set `GUI.depth` in each. **Lower depth
+renders on top.** `GUI.depth` is a static shared across all OnGUI scripts, so pin it
+explicitly in *both* scripts' `OnGUI` (e.g. dialog `GUI.depth = 0`, widget
+`GUI.depth = -10` while the dialog is open) — otherwise one script's value leaks into
+the other and the ordering flips unpredictably. Used by Uncover's
+`MinimapWidget`/`MinimapSettingsDialog` so the live minimap preview draws above the
+dialog's 0.55-alpha dim.
+
 ### Other interactive-IMGUI gotchas
 
 - **`Cursor.visible = true; Cursor.lockState = CursorLockMode.None`** in `Update` while active — the game re-locks the cursor every frame, so set them once in `Open()` AND keep enforcing them in `Update()`.

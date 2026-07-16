@@ -145,6 +145,42 @@ GameManager.ShowTooltip(xui.playerUI.entityPlayer, "Your message here");
 
 ---
 
+## Confirmation dialogs (XUiC_MessageBoxWindowGroup)
+
+Vanilla's modal message box works in-game (the eat-item prompt and quest rally
+confirm use it), not just on the main menu. Verified on 3.0.x:
+
+```csharp
+// (_xui, title, text, icon, onOk, onCancel, _openMainMenuOnClose, _modal, _cancelOnOutsideClick)
+XUiC_MessageBoxWindowGroup.ShowOkCancel(xui, "TITLE", "Body text.", "",
+    delegate { /* confirmed */ }, null, false);
+```
+
+- **Always pass `_openMainMenuOnClose: false` in-game** — the default `true` is
+  for main-menu contexts.
+- `ShowConfirmCancel(...)` is the same but supports a hold-to-confirm time
+  (`_confirmHoldTime`), used by vanilla for destructive actions like save
+  deletion.
+- The box opens on top of whatever custom window is open and is modal by
+  default; your window stays open behind it.
+
+---
+
+## Creative / debug mode detection
+
+What the `cm` / `dm` console commands actually toggle (3.0.x,
+`ConsoleCmdCreativeMenu` / `ConsoleCmdDebugMenu`):
+
+```csharp
+bool cm = GamePrefs.GetBool(EnumGamePrefs.CreativeMenuEnabled);
+bool dm = GamePrefs.GetBool(EnumGamePrefs.DebugMenuEnabled);
+```
+
+Use these to gate cheat-tier UI (e.g. the Elevator mod's Excavate/Demolish
+buttons). They are `GamePrefs`, not `GameStats`.
+
+---
+
 ## Grid Controllers
 
 The grid controller exposes a public method for the parent window to call *after* its data is ready (see `OnOpen()` ordering gotcha below):
@@ -413,3 +449,72 @@ Declare the controller on the window_group only, leave it off the `<window>` ele
 ```
 
 When adding a new app window, leave a comment above the `<window>` tag explaining *why* `controller=` is intentionally absent — future-you won't remember and may "fix" it back.
+
+## Moving a vanilla XUi window at runtime (`ViewComponent.Position`)
+
+You can reposition any window — including vanilla HUD windows — from C# by
+setting its view's `Position` (a `Vector2i`, integer UI units). No XML patch,
+no controller subclass. Verified on the 2026-07 build in Uncover
+(`HudStatBarShift.cs`), lifting the bottom-right HUD cluster above the minimap:
+
+```csharp
+XUiController win = xui.GetChildById("HUDRightStatBars"); // root XUi.GetChildById searches all groups
+XUiView view = win?.ViewComponent;
+if (view != null && view.Position.y != targetY)
+    view.Position = new Vector2i(view.Position.x, targetY);
+```
+
+- **`XUiView.Position` set → the transform actually moves.** The setter writes
+  `position` *and* `positionDirty = true`; the view's per-frame `Update` calls
+  `TryUpdatePosition()` when dirty, so the NGUI transform follows on the next
+  frame. No need to poke `isDirty`/`uiTransform` yourself.
+- **Offset is from the window's `anchor`.** `HUDRightStatBars` is
+  `anchor="BottomRight" pos="0,0"`, so **+Y = up**, +X = right (toward the
+  corner). Raising Y lifts the whole cluster; X stays 0.
+- **Units are XUi's 1080p-authored space** — the same units used in
+  `windows.xml` `pos=` and by IMGUI overlays authored "at 1080p" (Uncover's
+  minimap uses `Screen.height/1080` scaling). So a minimap of `SizePixels`
+  side length is cleared by lifting the bars ~`SizePixels + gap` in Y directly.
+- **Cache the controller, but re-resolve if `ViewComponent == null`** — a HUD
+  rebuild (resolution change, `xui reload`) re-parses the window and resets
+  `Position` to the XML value. Re-assert your target only when it drifts
+  (`view.Position.y != targetY`) so you don't dirty the view every frame *and*
+  you self-heal after a rebuild.
+- `xui` here is `LocalPlayerUI.GetUIForPrimaryPlayer().xui`; drive it from any
+  per-frame loop (Uncover calls it from the minimap `MonoBehaviour.Update`).
+
+`HUDRightStatBars` itself is the **bottom-right HUD cluster**: the held-item
+ammo/durability bar (`stat_type="ActiveItem"`), item-pickup toasts
+(`CollectedItemList`), and — only while driving — vehicle fuel/health bars. All
+three are conditionally visible, so an empty-handed player on foot sees nothing
+there; pull out a gun to make the ammo bar appear and test overlap.
+
+## Interaction prompt override (XUiC_InteractionPrompt)
+
+To show the vanilla "Press ( E ) to ..." HUD prompt for a custom interaction
+(verified in minecarts `EntityMinecart.UpdateInteractionPromptOverride` and
+zPhone `GodLightSwitch`):
+
+```csharp
+string binding = player.playerInput.Activate.GetBindingXuiMarkupString()
+               + player.playerInput.PermanentActions.Activate.GetBindingXuiMarkupString();
+XUiC_InteractionPrompt.SetText(ui, "Press ( " + binding + " ) to interact with light");
+```
+
+- `SetText(ui, text)` opens the prompt window (non-modal); `SetText(ui, "")`
+  (or null) closes it. Nothing auto-clears it — if you stop calling SetText
+  while your text is showing, it sticks on screen.
+- Re-apply every frame from **LateUpdate** so your override lands after
+  vanilla's own prompt writes for the frame.
+- On losing focus, clear only if you still own the prompt, so you don't stomp
+  a prompt a vanilla interactable took over this frame:
+  ```csharp
+  var prompt = ui.xui.FindWindowGroupByName(XUiC_InteractionPrompt.ID)
+      ?.GetChildByType<XUiC_InteractionPrompt>();
+  if (prompt != null && prompt.Text == myLastText)
+      XUiC_InteractionPrompt.SetText(ui, "");
+  ```
+  (`Text`'s getter is `[PublicizedFrom]` → public in the shipped assembly.)
+- `player.playerInput.Activate` is a `PlayerAction` from **InControl** — the
+  csproj needs a reference to `Managed\InControl.dll` or you get
+  CS0012 "type 'PlayerAction' is defined in an assembly that is not referenced".
