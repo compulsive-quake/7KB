@@ -420,5 +420,20 @@ instead of trusting a one-time snapshot. Use the non-allocating
 `GetComponentsInChildren(includeInactive, List<Renderer>)` overload with a static
 scratch list so the per-frame scan doesn't churn GC. Panels/dressed blocks are few
 per world, so a full rescan is cheap. Keep the one-time snapshot only for measuring
-the vanilla footprint (LOD0 bounds), not for the hide. Reference:
-`Elevator/src/ElevatorPanelView.cs` (`ReassertHidden`).
+the vanilla footprint (LOD0 bounds), not for the hide.
+
+**Critical: gate the hide on your dressing actually being built, or you get an
+invisible block.** The re-hide runs every frame, typically at the top of your
+per-rig refresh — *before* the build step that (re)creates your dressing. On a
+freshly created rig, or any frame the art/build bails early (missing shader,
+chunk not ready), your replacement root is still null/empty. If you hide the
+vanilla renderers anyway, the result is vanilla-off + nothing-drawn = **invisible**
+(not the graceful "keeps the vanilla look" fallback you want). The old snapshot
+approach was *implicitly* gated — the snapshot only got set inside a successful
+build — and a naive rescan-at-top-of-refresh silently drops that safety. Guard it:
+`if (root == null || root.transform.childCount == 0) return;` before hiding. Do the
+*first* hide inside the build itself, in the same call that draws the plate (no
+early-return between capture and draw), so vanilla is never hidden without a
+replacement up the same frame. This exact regression shipped and blanked the
+Elevator panel (fixed 2026-07-15). Reference:
+`Elevator/src/ElevatorPanelView.cs` (`ReassertHidden`, gated on Root children).

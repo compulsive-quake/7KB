@@ -74,6 +74,48 @@ into region data (does not need the chunk to stay loaded), which is what
 chunk gets generated) — log progress and warn the user; re-open the map (M) to
 see the result. This is Uncover's `uncover` command.
 
+### Pausing / resuming a reveal (MapVisitor can't — clone it)
+
+`MapVisitor.visitCo` always walks its full rect; there is no way to start it
+mid-way. Its walk is deterministic though, so a resumable clone is easy
+(see `UncoverVisitor` in the Uncover mod):
+
+- It steps a single `ChunkManager.ChunkObserver` (`AddChunkObserver(pos,
+  false, viewDim: 8, -1)`) across the world in **17×17-chunk tiles**
+  (stride `viewDim*2+1`), X fastest then Z. Tile centers start at
+  `min(chunkMin+8, chunkMax)` per axis and advance by 17 while
+  `center-8 <= chunkMax`; per-chunk visits clamp to the world chunk rect.
+- A **linear tile index** over that grid is a perfect resume cursor: persist
+  "next tile" and reconstruct everything else analytically (chunks covered by
+  skipped tiles = sum of clamped 17×17 intersections). Redoing a partially
+  finished tile on resume is cheap — its chunks are already generated on disk.
+- Persist the cursor per save: `GameIO.GetSaveGameDir()` (parameterless) is
+  the current save folder; a JSON dropped there dies with the save. Store the
+  world extent too and refuse to resume if it changed.
+- **Checkpoint ordering matters**: the fog DB only hits disk via
+  `IMapChunkDatabase.SaveAsync`. On a host, `GameManager.SaveLocalPlayerData()`
+  (public) is the vanilla wrapper that schedules it. Flush the DB *before*
+  writing the cursor file so a hard kill can only lose re-visitable work,
+  never leave fog holes behind a too-far-ahead cursor.
+- `ModEvents.WorldShuttingDown` fires at the **top** of the shutdown path,
+  *before* the game's own `SaveLocalPlayerData()`/`SaveWorld()` — the right
+  hook to stop the visitor and write the cursor on quit-to-menu; the game's
+  own save then flushes the fog DB. Handler signature:
+  `void H(ref ModEvents.SWorldShuttingDownData d)` via
+  `ModEvents.WorldShuttingDown.RegisterHandler(H)`.
+
+Related UI facts (verified July 2026 build):
+
+- `XUiC_MessageBoxWindowGroup.ShowCustom(xui, title, text, icon, setup, ...)`
+  gives fully custom dialogs: in `setup`, `box.buttons[0].DefaultConfirm(key,
+  cb)` / `buttons[1].Set(key, null, cb)` / `buttons[2].DefaultCancel("xuiCancel",
+  cb)` (captions are Localization keys; buttons close the box on press). Do
+  NOT put a destructive action on `DefaultCancel` — it binds the Esc/Cancel
+  hotkey. `MessageButton.Set` takes an InControl `PlayerAction`, so the mod
+  csproj needs a reference to `InControl.dll` even to pass `null`.
+- Vanilla pause/play icon sprites: `ui_game_symbol_twitch_pause` /
+  `ui_game_symbol_twitch_play` (plain UIAtlas, no `atlas=` attribute needed).
+
 ---
 
 ## Spawn freeze after a full reveal (fog DB load holds its lock)

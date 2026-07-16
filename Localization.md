@@ -6,9 +6,12 @@ Part of the [7DTD Modding Knowledgebase](README.md). Covers adding translated te
 
 ## File Location
 
-`Config/Localization.txt` — a CSV file the game merges with vanilla localization.
+- **3.0.0+:** `Config/Localization.csv` — the game renamed the file; `Localization.txt` is **silently ignored** (decompiled `Localization.LoadPatchDictionaries` hardcodes `_folder + "/Localization.csv"`; `ModManager.LoadLocalizations` passes `mod.Path + "/Config"`). Symptom: raw keys like `vehicleFooPlaceable` shown in tooltips, no error anywhere. Ship both names if a mod must work on 2.x and 3.0 (found 2026-07-15 — the Supra mod's `.txt` is also dead on 3.0.0 for this reason).
+- **Pre-3.0:** `Config/Localization.txt`.
 
-> **Gotcha:** Put mod localization under `Config/Localization.txt`, not at the mod root. A root-level `Localization.txt` may be copied by deployment but will not be picked up by the game in the standard mod loading path. Check `Player.log` for `Loading localization from mod: YourMod`; if that line is missing, the game did not load the mod's localization file.
+> **Gotcha:** Put mod localization under `Config/`, not at the mod root. A root-level file may be copied by deployment but will not be picked up by the game. Check `Player.log` for `[MODS] Loading localization from mod: YourMod`; if that line is missing, the game did not load the mod's localization file.
+
+Patch CSVs are merged **by header column name** (case-insensitive), so a mod file without the newer vanilla columns (e.g. `KeepLoaded`, added in 3.0.0) still maps `english` correctly.
 
 ---
 

@@ -124,6 +124,16 @@ single `Data/Config/XUi/` folder is gone), but mods still ship their own `Config
 
 This is an XUi-only change → hot-reloadable (`xui reload`), no DLL rebuild or game restart.
 
+## Localization: `Config/Localization.txt` → `Config/Localization.csv`
+
+3.0.0 renamed the per-mod localization file. `Localization.LoadPatchDictionaries`
+hardcodes `Localization.csv`; a mod still shipping `Localization.txt` gets **no error,
+no log line** — item/entity tooltips just show raw keys (`vehicleFooPlaceable`).
+Rename (or ship both for 2.x compat) and **restart** the game — mod localization is
+only loaded at startup (`ModManager.LoadLocalizations` bails when `_isLoadingInGame`).
+Column mapping is by header name, so old headers without 3.0.0's `KeepLoaded` column
+still work. Details in [Localization](Localization.md).
+
 ## Migration checklist
 
 1. Point the csproj `Assembly-CSharp` reference at the 3.0.0 `7DaysToDie_Data\Managed\`.

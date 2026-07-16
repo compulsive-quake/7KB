@@ -14,6 +14,7 @@ Shared conventions for the ModForge desktop app UI.
 ## UI performance
 
 - Avoid high-frequency `git_diff_summary(..., include_diff=true)` calls from visible React components. On 2026-07-14, brief UI lockups during typing were traced to repeated git diff work in Source Control and Codex live edit summaries. Keep Source Control refreshes serialized and slow (currently every 5 minutes), and use `includeDiff=false` for periodic/background Codex diff snapshots unless exact patch text is needed for a one-shot action.
+- Renderer stall profiling lives behind Settings -> Performance -> "Enable renderer performance monitor" (added 2026-07-15). It persists `performance_monitor_enabled`, `performance_monitor_threshold_ms`, and `performance_monitor_console_logging`, mounts `PerformanceMonitor`, and records long tasks, event-loop drift, frame gaps, prompt input event delay, and prompt input-to-next-frame latency. Samples stay in renderer memory; optional console warnings use the `[modforge:perf]` prefix.
 
 ## Deploy queue marker
 
