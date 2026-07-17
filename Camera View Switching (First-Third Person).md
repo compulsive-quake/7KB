@@ -130,7 +130,6 @@ Implemented in RocketTurret `ItemActionRocketTurretPointer.IsCameraParked` +
 fallback). Note: the earlier "read `playerCamera` instead of `cameraTransform`"
 workaround there was a no-op for exactly the reason above — they're one transform.
 
-<<<<<<< Updated upstream
 ## The *other* half of the freeze: a stuck input action set (`PlayerActionsLocal.Enabled`)
 
 The camera-park fixes above (watchdog + horizontal reach cap + head-basis
@@ -226,7 +225,6 @@ Fix has **two halves**, both in FPV `FPVDroneManager.TryComputeGroundSpot`:
 With the LateUpdate watchdog above now holding the camera on the head, half (2)
 should rarely fire in practice — but it's kept as defence-in-depth (and documents
 the consumer-side pattern) in case a frame slips through before the watchdog wins.
-=======
 ## The ~1 m threshold is NOT a floor for near/steep-down aiming
 
 The "past ~1 m = parked" heuristic assumes the failure is a camera *metres* out.
@@ -250,4 +248,3 @@ column no matter where the camera has drifted. This removes *all* sensitivity to
 camera position, making the 1 m threshold matter only for choosing the direction
 source. Cheaper and more reliable than trying to detect every sub-metre residual.
 Implemented in FPV `FPVDroneManager.TryComputeGroundSpot`.
->>>>>>> Stashed changes

@@ -1288,11 +1288,8 @@ vehicles:
 | Rider stuck inside the ground on dismount | All `seat.exit` candidates are blocked. Add an "above" exit (`0,1.5,0`) |
 | WASD does nothing while riding | Route A vehicle with no `motor*` or `force*` entries, OR Route B vehicle whose `OnUpdateLive` returns before the input handler runs |
 | Bike falls under gravity when nobody's on it | Custom prefab with no `useGravity = false` on the synthesized rigidbody |
-<<<<<<< Updated upstream
 | Windows/glass render opaque white (or dye colors the wrong part) | `VehiclePart.SetColors` stomped material slot 0 of the first renderer under the `paint` transform with the tint (white when undyed). Put the car-paint material at slot 0 and author its color in the albedo texture with white `_Color` — see the paint/dye contract above |
-=======
 | Placeable item only places on grass / odd blocks, not normal ground | Custom spawn action gates on `Block.shape.IsSolidSpace`, which smooth terrain fails. Use the vanilla raycast + physics hit point instead (see **Placement**) |
->>>>>>> Stashed changes
 
 ---
 

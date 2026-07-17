@@ -124,7 +124,6 @@ single `Data/Config/XUi/` folder is gone), but mods still ship their own `Config
 
 This is an XUi-only change → hot-reloadable (`xui reload`), no DLL rebuild or game restart.
 
-<<<<<<< Updated upstream
 ## Localization: `Config/Localization.txt` → `Config/Localization.csv`
 
 3.0.0 renamed the per-mod localization file. `Localization.LoadPatchDictionaries`
@@ -134,7 +133,6 @@ Rename (or ship both for 2.x compat) and **restart** the game — mod localizati
 only loaded at startup (`ModManager.LoadLocalizations` bails when `_isLoadingInGame`).
 Column mapping is by header name, so old headers without 3.0.0's `KeepLoaded` column
 still work. Details in [Localization](Localization.md).
-=======
 ## Block activation methods also lost `_cIdx` (and the `_interaction` string)
 
 The `Block` activation surface dropped the cluster-index parameter in 3.0.0 (same
@@ -198,7 +196,6 @@ Also new and very useful: **`ModEvents.UnityUpdate`** fires every Unity frame �
 per-frame input polling / timers from a plain static class, no MonoBehaviour or
 Harmony patch needed. Guard on `GameManager.Instance?.World != null` since it also
 fires in the main menu.
->>>>>>> Stashed changes
 
 ## Migration checklist
 

@@ -1,4 +1,3 @@
-<<<<<<< Updated upstream
 # Moving Blocks at Runtime (SetBlocksRPC) & Rendering Blocks as Moving Meshes
 
 How to relocate world blocks in code (elevators, moving platforms) and how to
@@ -84,7 +83,6 @@ Gotchas learned the hard way:
 - Pre-check the whole path is clear *before* removing anything, and block
   players from building into the swept volume while riding
   (`Block.CanPlaceBlockAt` postfix).
-=======
 # Moving Blocks at Runtime (SetBlocksRPC)
 
 Part of the [7DTD Modding Knowledgebase](README.md). How to relocate a volume of
@@ -472,4 +470,3 @@ world.SetBlocksRPC(changes);
   physically are.
 - If a control block (button panel) rides inside the moving box and your mod keys
   data by its position, remap the key every step.
->>>>>>> Stashed changes
