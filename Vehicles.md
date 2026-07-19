@@ -193,6 +193,24 @@ Key facts:
   cosmetics grid via a Harmony postfix on
   `XUiC_VehicleWindowGroup.CurrentVehicleEntity` setter
   (`cosmeticGrid.ViewComponent.IsVisible = false` for your class only).
+- **Custom drive model / manual gearbox (Supra 2026-07):** the vanilla
+  torque path can be replaced per-vehicle without Harmony: subclass and
+  override the virtual `SetWheelsForces` (write `wheelC.motorTorque` /
+  `brakeTorque` / friction stiffness per wheel yourself — replicate the
+  base's `frictionPercent` math) and `UpdateWheelsSteering` (call base,
+  then scale `wheels[0..1].wheelC.steerAngle` for speed-sensitive
+  steering); wrap physics with `public new void FixedUpdate()` +
+  `base.FixedUpdate()` for downforce/drag. ANALOG pedals already exist:
+  `movementInput.moveForward` = `VehicleActions.Move.Y`, and the
+  controller's RT/LT are bound to MoveForward/MoveBack — trigger pressure
+  arrives as a smooth ±1 axis (keyboard W/S = digital ±1). Free inputs for
+  shifting: Turbo action (LeftShift/RB) and Hop action (crouch/A — inert
+  when the vehicle XML has no hopForce); vehicle Brake action (Space/X) =
+  `movementInput.jump`, good for a handbrake. Raise `velocityMax_turbo`
+  caps when an engine model owns top speed — the caps clamp rigidbody
+  velocity regardless of torque. `CurrentIsAccel`/`CurrentIsBreak` are set
+  by the CALLER after SetWheelsForces from the vanilla calc, so they still
+  roughly track pedal state for audio/brake-light consumers.
 - **Brake lights (Supra 2026-07):** don't use the vanilla `tailEmissive`
   headlight property — it writes `_EmissionColor` on the slot-0 PAINT
   material (`vehicle.mainEmissiveMat`), i.e. the whole body glows. Instead
@@ -491,6 +509,79 @@ set, so the animator stays in its locomotion state. See
     <property name="sound_start" value="Vehicles/MyBike_start"/>
     <property name="sound_shut_off" value="Vehicles/MyBike_shutoff"/>
 </property>
+```
+
+### VPEngine gear string, fully decoded (2026-07-17, from Assembly-CSharp)
+
+`gearN` = 8 header floats, 2 one-shot names, then 8 fields per looping clip:
+
+```
+rpmMin, rpmMax,                      // band the loop pitch/vol lerps across
+rpmDecel, rpmDownShiftPoint, rpmDownShiftTo,
+rpmAccel, rpmUpShiftPoint, rpmUpShiftTo,
+accelSound, decelSound,              // one-shots: gear engage / throttle lift
+// per loop:
+pitchMin, pitchMax, volMin, volMax,  // lerped by rpmPercent; pitch is an
+                                     // offset from rate 1.0
+pitchFadeMin, pitchFadeMax, pitchFadeRange, clipName
+                                     // vol ramps to 0 over fadeRange once the
+                                     // computed pitch leaves [fadeMin,fadeMax];
+                                     // loops under 1% volume are stopped
+```
+
+The rpm is FAKE: it ramps at `rpmAccel`/sec while accelerating and falls at
+`rpmDecel`/sec otherwise; crossing `rpmUpShiftPoint` advances the gear, snaps
+rpm to `rpmUpShiftTo`, and fires the next gear's accel one-shot. Vanilla's
+engine character is ~90% those recorded accel/decel sweeps; under them the
+4x4/SUV runs only TWO loops: idle (`0,.7,1,.1,-9,.12,.1` — dead by pitch
+0.22) and a top-rpm loop only ever pitched DOWN (`-.4,-.02,.7,.7,-.2,9,.2`).
+Slowed loops stay clean; sped-up loops alias — never ship a loop that has to
+speed past ~1.2×.
+
+AssettoCar's final engine design (2026-07-18, after three failed shapes):
+**an AC-style live crossfade over an EVENLY-SPACED synthesized ladder with
+TIGHT windows.** `sounds::render_loop` resamples the bank's raw rpm slices
+(uneven — the McLaren jumps 2× between neighbours) into steady seamless
+loops at even log spacing (neighbour ratio ≤ 1.5, ≤ 7 loops + real idle);
+`modgen::sound_ranges` emits one VPEngine loop line per rung where pitch
+endpoints put the loop exactly on the linear frequency track
+(pitch = f(p)/f0 − 1) and the fade window is pinned to native pitch
+(fade_min = fade_max = 0, fade_range = nearest-neighbour gap). Result: at
+any rpm exactly two loops audible, each within ~20% of native pitch,
+tracking the tach — verified by zcr profile of the rendered drive (pitch
+rises through the pull and DROPS at each shift).
+
+**One-shot rule: real recordings or silence, never synthesized sweeps.**
+The accel/decel one-shots fired at shifts/lifts are the bank's own
+recordings when present, else a real short transient (gear-click growl,
+blow-off valve), else a beat of silence. A baked frequency sweep fired at
+an upshift plays AGAINST the live crossfade, which is simultaneously
+glissing DOWN to the shift floor — two ramps crossing read as a "weird
+frequency shift" on every gear change. The crossfade itself IS the shift
+sound.
+
+**Pitch axis rule: never measure what the FMOD event graph already says.**
+Engine pitch scales 1:1 with rpm, and rpm-keyed ladders (the common case)
+carry TRUE centre rpm per rung — use those values directly as the pitch
+axis (idle = 850, the drivetrain's IdleRpm; every downstream computation
+is ratio-based so units don't matter). Autocorrelation f0 measurement is
+only a fallback for name-based ladders: on the McLaren it locked onto
+subharmonics, silently dropped 3 of 7 rungs, and placed 6k-rpm recordings
+low on the axis — which made the crossfade audibly play redline slices at
+1800 tach rpm.
+
+What failed and why (don't re-try these):
+1. Wide overlapping fade windows (quarter-log-point recipe): 2–3 slices
+   audible at big pitch offsets → beating/chipmunk chaos below ~40% rpm.
+2. Vanilla two-loop idle+max_speed_lp clone: an AC high-rpm slice as the
+   max loop reads as an out-of-place scream when it fades in (vanilla's is
+   a muffled truck cruise).
+3. One gently-bent idle loop: pitch-shifting an idle 1.7× sounds like a
+   fast-forwarded tape, not revving.
+Key lesson: pitch-bending is only inaudible within ~±20% of native — the
+ladder must be dense and even enough that crossfades never need more.
+
+```xml
 
 <property class="fuelTank">
     <property name="class" value="FuelTank"/>

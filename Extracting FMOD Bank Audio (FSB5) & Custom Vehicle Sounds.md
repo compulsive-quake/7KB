@@ -36,6 +36,23 @@ Working extractor: `Supra/tools/extract_bank.py` (bank → named WAVs).
   shutoff), `rupt` = limiter, plus `horn`, `gear_up/dn`, `skid`, `wind`, etc.
 - Audio-blind sanity checks that worked: RMS envelope in fifths (steady =
   loop, decaying = shutoff-shaped) and zero-crossing rate to rank RPM slices.
+- **Third naming convention: rpm-numbered takes** (bksy Mazda ND, 2026-07-18):
+  samples named by their centre rpm plus a take letter — `3068a`, `5531a`,
+  `idle_1332`, mic variants like `6419b_inside`, and **off-throttle takes
+  suffixed `_off`** (`3917b_off`). The `_off` takes are overrun recordings
+  and must be excluded from the on-throttle crossfade ladder (an even-spread
+  rung pick once chose `5531a_off` OVER `5531a` — the engine went limp
+  mid-pull). The idle's true rpm comes from the FMOD event graph (1318 for
+  the ND) or the name digits; AC cars do not all idle at ~850.
+- **Names lie — always duration-gate transient roles** (2026-07-17): the ASW
+  McLaren 765LT's `growlshiftpop02` is a 45 s on-throttle growl LOOP, not a
+  shift pop. Name-matched as the "gear click" and layered onto the shift
+  one-shots it played as a constant unreal whine over the whole pull. A real
+  click is ≤ ~2.5 s, blow-off ≤ ~3 s, accel/decel one-shots ≤ ~8 s
+  (AssettoCar `sounds.rs::classify` now enforces these). Related: when
+  mixing multi-layer rungs, trim to the SHORTEST layer — padding to the
+  longest leaves a tail where one quiet layer plays alone, which becomes a
+  periodic dropout in a loop; and an overlay must never extend its base clip.
 
 ## Wiring into a 7DTD vehicle (XML only)
 
