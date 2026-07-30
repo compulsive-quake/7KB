@@ -176,3 +176,51 @@ underneath is air. Net effect: bullets/melee stop on the moving car without
 damaging anything, no NREs observed in the paths read. If a platform must be
 transparent to targeting, layer 13 is the hiding spot — but then nothing can
 walk on it.
+
+## Crushing what a DESCENDING platform lands on
+
+Left to physics, a layer-16 proxy floor coming down on a creature standing in
+the shaft below just grinds it into the terrain (half-buried, still alive) —
+the proxy collider pushes the KCC down, the KCC pins it to the ground. To make
+the car *crush* instead (Elevator, 2026-07), kill anything the underside
+descends onto with vanilla falling-block damage:
+
+```csharp
+victim.DamageEntity(DamageSource.fallingBlock, 1_000_000, true, 1f);
+```
+
+`DamageSource.fallingBlock` is the ready-made `(External, Crushing)` preset
+(same one `EntityFallingBlock` uses). A huge strength one-shots even a
+high-gamestage feral; `_criticalHit:true` triggers dismemberment/gib. No
+attacker id, so `FriendlyFireCheck(null)` (base returns true) and the
+zombie-vs-zombie guard (needs a non-null attacker) both pass — it lands on
+zombies fine.
+
+Run it only on descent (`dy < 0`), and separate **victims** (below the car)
+from **riders** (on/inside the cab) so you never crush who you're carrying:
+
+- **Vertical gate — the key discriminator**: `victim.position.y > carBottom +
+  0.2` → skip. `carBottom` = the car's world-space underside (`BoundsMin.y +
+  floatOffset`). Anyone standing on the roof or on the cab floor sits *above*
+  the underside; only things whose feet are below it are being landed on. This
+  alone excludes all riders (grounded or mid-jump), unlike the downward
+  `StandingOnCar` probe which misses an airborne cab occupant.
+- **Solid-above confirm — `CarOverhead`**: cast a ray *up from just above the
+  feet* (`position + up*0.1`, always below the underside, so it never starts
+  embedded) over `GetHeight() + 0.3 + abs(dy)`, mask `1<<16`, require
+  `hit.transform.IsChildOf(proxyRoot)`. This (a) only fires where the car is
+  actually solid over that column — an L-shaped car's open columns don't crush
+  — and (b) since layer 16 is shared with terrain, a real block between them is
+  hit first (`IsChildOf` false) and shields the victim.
+
+Two robustness notes: cast a **ray, not a SphereCast** — a SphereCast started
+overlapping the ground floor hits the documented zero-distance gotcha, and a
+ray up from `+0.1` above the feet points away from the ground so it never
+snags it. And extend the reach by `abs(dy)` because at high speed × low fps a
+single step (up to ~2 m at the 32 m/s cap) can otherwise skip the contact
+frame entirely — the extension guarantees the sweep is caught.
+
+Filter order: `as EntityAlive` (drops vehicles/items) → skip `EntityPlayer`
+and `IsDead()` → skip `AttachedToEntity != null` → vertical gate →
+`CarOverhead`. Query candidates with `GetEntitiesInBounds` over the footprint
+extended ~3 m below the underside.

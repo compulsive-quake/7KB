@@ -185,6 +185,25 @@ Validate once in the item action (`TryGet…` returning the denial tooltip
 string) and pass the spot into the spawn/launch code instead of recomputing —
 recomputing on a later frame can disagree with the preview the player saw.
 
+**Picking the block itself** (Elevator mod, "pick 2 corners" bounds editor):
+same ray, then read `Voxel.voxelRayHitInfo.hit.blockPos` — already world block
+coords, feed straight to `world.GetBlock`. Two guards, because `Raycast`
+returns `true` for non-block hits too:
+
+- `raycastNew` calls `voxelRayHitInfo.Clear()` on entry, so an **entity** hit
+  returns true with `tag` set (`E_…`), `hit.pos` filled and `hit.blockPos ==
+  Vector3i.zero` — reject on `hit.blockValue.isair` rather than trusting
+  `bHitValid`, or a zombie walking through the crosshair silently "picks"
+  block 0,0,0.
+- The bullet hitmask (`8`) skips water and non-collidable deco; the
+  `bHitTransparentBlocks`/`bHitNotCollidableBlocks` bool overload does *not*
+  (its mask is `0x42|…`, and bit 2 is water), so aiming at a pond picks a
+  water block.
+
+Blocks only have colliders where chunks are displayed, so any aim range past
+the render distance is a cap, not a promise — no hit simply means "nothing to
+pick", which is the right UX anyway.
+
 ---
 
 ## Shape Types

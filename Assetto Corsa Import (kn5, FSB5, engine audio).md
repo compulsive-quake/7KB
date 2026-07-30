@@ -172,7 +172,8 @@ Bank sample naming (per soundset, wildly inconsistent between modders):
   `int`/`ext` prefix is mic position, `_012` is a shared take-id (NOT a slice
   number), and the rev band is a WORD. Order by
   `idle<verylow<low<lowmid<mid<midhigh<high<veryhigh` (separators stripped,
-  most-specific word wins), one loop per rung (prefer the ext-mic take).
+  most-specific word wins), one loop per rung; interior takes are dropped by the
+  exterior-only mic policy below (not merely deprioritized).
 
 Classifier (`pipeline/sounds.rs` `classify`): expanded one-shot keyword
 filter + an **acoustic duration gate** (`MIN_LADDER_SECS` 2.5s — a real
@@ -241,6 +242,41 @@ that yields <3 rungs does it fall back to the name/acoustic heuristic, so it
 never regresses. McLaren went 5 heuristic rungs → 7 ground-truth rungs
 (1700–6600). Review UI logs "Engine ladder from the FMOD event graph: N
 rungs, LO–HI rpm (ground truth)".
+
+### Exterior-only mic policy (2026-07)
+
+7DTD always renders the car from an OUTSIDE camera, so the interior/cabin-mic
+engine takes are the wrong recording — a muffled, boxy version of the exterior
+sound. AC ships several mics (`int*` interior, `ext*`/`newext*` exterior,
+`pot`/`exh` exhaust) and switches between an `engine_int` and `engine_ext` event
+by camera; we only ever want the exterior set. In `pipeline/sounds.rs`:
+
+- `is_interior_mic(name)` = contains `int`/`inside`/`cabin`/`cockpit`/`onboard`
+  AND no exterior marker — `ext`/`pot`/`exh` win, so `newext`/`sprint_ext` read
+  as exterior, not interior.
+- `classify` builds the ladder from the **exterior mask first** (loop candidates
+  minus interior) and keeps it when that still yields ≥3 rungs; only if it
+  doesn't does it fall back to the full set. So an interior-only bank keeps its
+  cabin takes (a muffled engine beats the donor engine), but any car with a
+  usable exterior/exhaust set uses ONLY those. Folded into the `is_loop` mask, so
+  it covers all three ladder paths (FMOD grouping, numeric slice, band word) at
+  once.
+- **The bug it fixes:** the FMOD ground-truth path groups every same-rpm take as
+  the layers of one rung, so it was mixing the `int` cabin mic in as a 0.7
+  secondary layer under the `ext` primary — audible as muddiness. The per-rung
+  `rank`/`mic_rank` (prefer exhaust/ext) still runs but now only matters in the
+  interior-kept fallback.
+- `describe_samples` labels a skipped interior take in the review list
+  ("interior (cabin-mic) engine take — skipped; 7DTD plays the exterior mics") so
+  it reads as a deliberate choice, not a dropped sample. Regression tests:
+  `sound_classify.rs` `exterior_mics_win_over_interior_when_they_cover_the_range`
+  + `interior_kept_when_it_is_all_there_is`.
+
+Note this is a NAME-based policy layered on top of the event-graph parse (which
+still collects both `engine_ext` and `engine_int` samples — see the gotcha
+above). A bank whose sample names don't encode the mic and relies purely on the
+two events to separate int/ext would slip through; using the event membership to
+partition int vs ext authoritatively is the future-proof upgrade if that shows up.
 
 f0 is STILL what drives the crossfade: the VPEngine `SoundRange` math is about
 audio pitch (playback-rate ratios of each loop's fundamental), so f0 is the

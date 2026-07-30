@@ -44,15 +44,40 @@ clamp (`1 .. 250 - size.y`) and refuse while `ElevatorMover.Active`
 Because the ground row's *relative* height is 0 by definition, showing that
 offset makes the +/- steppers look dead — the number never changes no matter
 how many times you click (the user reported "can't adjust floor 1 rise after
-creation" while the code path worked fine). Fix: the ground row's Height
-field shows the anchor's **world Y** (`"y" + BoundsMin.y`) instead of the
-frozen 0, and every refused adjustment (world-height clamp, 1..MaxRise gap
-limits, bounds not set) shows a `GameManager.ShowTooltip` explaining why
-instead of a silent `return`.
+creation" while the code path worked fine). Fix: the floor list carries a
+**World** column (`BoundsMin.y + OffsetOfFloor(floor)`) next to the relative
+Height column, so the anchor row still moves visibly when stepped, and every
+refused adjustment (world-height clamp, 1..MaxRise gap limits, bounds not
+set) shows a `GameManager.ShowTooltip` explaining why instead of a silent
+`return`.
 
 General UI rule: a stepper that silently no-ops or edits a value the row
 doesn't display reads as broken. Surface the value that actually changes,
 and tooltip every refusal.
+
+## UX: a blocked path must not veto the height edit (added 2026-07-28)
+
+A car parked at the edited floor jumps to follow it in real time, so the
+first implementation undid the `Rise` edit whenever that jump failed. That
+makes `+` unusable for the normal build order — you cannot raise a floor into
+dirt you have not dug out yet, which is exactly when you want to place it.
+
+Rule: **plan-side data edits are never refused for something the player can
+dig away.** `ElevatorSettingsController.ApplyRise` collects the swept-path
+blockers (`ElevatorPath.CollectFloorBlockers`) *after* applying the rise; if
+any exist, the edit stands and the car simply stays behind — the row then
+reads red/`BLOCKED` (and offers Excavate/Demolish in creative). Only failures
+nothing can clear (world height limit, unloaded area, mid-ride) roll the edit
+back. Once the car is no longer at the floor, `carFollows` is false and
+further clicks are plain data edits, so `+` keeps stepping.
+
+This works for the ground floor too: leaving the car behind there is pure
+bookkeeping (`BoundsMin.y += delta` with `CurrentOffset -= delta` cancels
+out), so no block in the world moves.
+
+Corollary: the UI's blocked check and the mover's must share one implementation
+(`ElevatorPath`) — otherwise "clear" per the window and "blocked" per `Lift`
+disagree, and the edit gets rolled back for a reason the row never showed.
 
 ## General lesson
 

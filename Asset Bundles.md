@@ -424,15 +424,84 @@ The same technique on the mod's `.unity3d` (read `GameObject` objects, print `m_
 **Runtime safety net:** a custom block class can force the tag on every model spawn, which fixes already-built bundles without a Unity rebuild:
 
 ```csharp
+// 3.0.0 signature — the old 2.x form took an `int _cIdx` after _blockPos.
+// A Harmony patch on this method that still declares `_cIdx` fails at patch
+// time with `Parameter "_cIdx" not found`.
 public override void OnBlockEntityTransformAfterActivated(WorldBase _world,
-    Vector3i _blockPos, int _cIdx, BlockValue _blockValue, BlockEntityData _ebcd)
+    Vector3i _blockPos, BlockValue _blockValue, BlockEntityData _ebcd)
 {
-    base.OnBlockEntityTransformAfterActivated(_world, _blockPos, _cIdx, _blockValue, _ebcd);
+    base.OnBlockEntityTransformAfterActivated(_world, _blockPos, _blockValue, _ebcd);
     if (_ebcd != null && _ebcd.bHasTransform && _ebcd.transform != null
         && !_ebcd.transform.CompareTag("T_Block"))
         _ebcd.transform.tag = "T_Block";
 }
 ```
+
+---
+
+## Auditing a downloaded FBX for *dynamic* / instanced use — no Unity needed
+
+Before committing to a model whose parts you intend to spawn a variable number of
+(elevator floor buttons, keypad keys, gauge needles), answer three questions
+straight off the binary FBX with a ~60-line Python parser. Unity is not required
+and an editor round-trip tells you less.
+
+Binary FBX layout (header `Kaydara FBX Binary`, version at byte 23; `>=7500`
+means 64-bit offsets): each node is `EndOffset, NumProperties, PropertyListLen`
+then `NameLen`+name, then typed properties, then nested nodes, then a null
+record. Property codes: `Y`(i16) `C`(bool) `I`(i32) `F`(f32) `D`(f64) `L`(i64),
+arrays `f d l i c` (each `len, encoding, compLen` — **encoding 1 = zlib**), and
+`S`/`R` byte strings. Object names are stored **`name\x00\x01Type`** (reversed,
+NUL+SOH separated) — a naive regex for `Model::` finds nothing.
+
+Read `Objects > Geometry`: `Vertices`, `PolygonVertexIndex` (negative index =
+`-i-1` and ends the polygon), `LayerElementUV > UV` + `UVIndex`.
+
+1. **Are the parts separate?** A single-mesh export (one `Geometry`, one
+   `Model`) does NOT mean the parts are fused. Weld vertices by rounded
+   position, union-find across polygons, and the connected components fall out.
+2. **Are they instanceable?** Per component, translate its verts to its own
+   min-corner and hash the sorted point list. Identical hashes across N
+   components = one mesh you can spawn N times. Report the component centres to
+   recover the grid pitch.
+3. **Is the per-instance detail a UV offset?** Per component, find the UV island
+   sitting in the atlas's glyph/decal region. If every instance's island is the
+   same size and lands on a regular grid, the variation is **4 UV floats** — the
+   cheapest possible dynamic knob (retarget the quad, or give those faces their
+   own submesh + a runtime-generated atlas).
+
+Real result (Elevator, 2026-07, `resources/elevator---elevator-key-5-mb`, a
+Sketchfab-style COP panel): 5682 polys / one mesh / one material decomposed to
+**31 components = 1 body + 15 identical bezels + 15 identical button caps**, caps
+on a 2-column grid (x pitch 44.88, y pitch 32.0) each carrying exactly **one**
+0.0906×0.0878 label quad on a 4×4 glyph grid — i.e. purpose-built for dynamic
+button counts, even though nothing in the file says so.
+
+### Two traps this audit surfaces that a viewer hides
+
+- **Baked glyph inventory is a hard ceiling.** That panel's atlas holds only
+  `1-9 P GO STOP bell open close` + one blank cell. No `0`, no `10+`, no `B1`.
+  Any label past the baked set needs its own runtime atlas (or a TextMesh
+  overlay) — decide this *before* adopting the model, not after.
+- **"Recessed" detail is often painted, not modelled.** Check whether the
+  body's front is a single quad: here the whole button field is one face at
+  `u[0.062,0.738] v[0.776,0.894]` with all 15 recess rectangles painted into the
+  albedo, and the UV is **rotated 90°** (panel vertical → texture horizontal).
+  Fewer buttons than the bake = leftover painted holes. Fixable (stamp the
+  albedo at runtime — the mapping into a known quad is exact arithmetic), but
+  it's real work you must scope up front.
+
+A blank atlas cell is worth hunting for: it gives you a no-label cap for free.
+
+### Ship the mesh as code, not always as a bundle
+
+When only a handful of unique meshes matter (above: 87 + 208 + 165 = 460 faces),
+baking their vert/normal/UV arrays into the mod and building `Mesh` objects at
+runtime beats a `.unity3d` — no Unity install, no `T_Block` index-20004 trap, no
+stripped-shader magenta, and it preserves a code-built `getPrefab` architecture
+(see `Elevator/src/ElevatorPanelModel.cs`). Ship the PBR maps as loose PNGs and
+load them with `Texture2D.LoadImage` onto `Standard`. Prefer a real bundle once
+the geometry is large, skinned, or animated.
 
 ---
 

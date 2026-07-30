@@ -81,6 +81,41 @@ for (int i = 0; i < anims.Length; i++)
 `ElevatorDoors.StampDoorState` in the Elevator mod, called from
 `ElevatorMover.BuildProxy` for every captured model-entity block.
 
+## `SetOpen(open, animate:true)` needs the model already displayed, or the animation is silently lost
+
+`SetOpen(_animate: true)` → `HandleDoorAnimation(true)` → `UpdateAnimState`,
+which grabs `world.ChunkCache.GetBlockEntity(masterPos)` and, **only if it has a
+live transform** (`bHasTransform`), sets the `IsOpen` bool + fires the
+`OpenTrigger` that plays the slide. If the block-entity model isn't displayed
+yet, `UpdateAnimState` returns early — the animation request is **dropped
+without error**. Then, frames later, the chunk instantiates the model
+(`Chunk.OnDisplayBlockEntities` → `OnBlockEntityTransformAfterActivated` →
+`TileEntityComposite.SetBlockEntityData` → `TEFeatureDoor.ForceAnimationState`)
+which `Play(..., 1f)`-snaps the door to its final pose. Net effect: **the door
+pops open with no slide** — even though you asked for `animate:true`.
+
+This bites whenever you `SetOpen(true, true)` in the same frame you disturbed
+the door's chunk. In the Elevator mod the car's arrival re-places the whole car
+volume via `SetBlocksRPC` (a chunk remesh), then opened the arrival doors
+immediately — so every re-placed (and same-chunk) door opened instantly.
+Closing on **departure** looked fine because that runs while the door is still
+displayed and its chunk is untouched.
+
+Fix: **defer the open until the model is live again.** Queue the door master
+positions, then each frame check `GetBlockEntity(pos)?.bHasTransform` and only
+`SetOpen(true, true)` once it's true (with a few-second timeout fallback so a
+door whose chunk stays unloaded still gets its state set). See
+`ElevatorDoors.OpenAtArrival` + `DrivePendingOpens` (driven from
+`ElevatorDoors.Update`). Note this is the inverse problem to the proxy-clone
+snap above: there you *force* the snap on a model with no TE; here you must
+*wait* for the model so the TE-driven animation isn't thrown away.
+
+Don't over-apply the queue: if you haven't touched the door's chunk this frame
+the model is already displayed, so `SetOpen(true, true)` animates straight away.
+Only the deferred path needs the wait (`ElevatorDoors.OpenAtFloor` opens a
+parked car's doors directly; `OpenAtArrival` queues, because a landing just
+remeshed the chunk).
+
 ## Vanilla auto-close (and why you may want your own)
 
 `TEFeatureDoor` has built-in auto-close: block property `AutoCloseTime`

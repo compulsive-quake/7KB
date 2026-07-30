@@ -79,4 +79,7 @@ class (`GetOrCreateClass`).
 `BlastPower`, so an entities-only blast (BlastPower 0, BlockRadius 0) still shows
 its visual.
 
-See also [[Entity Positions]] (absolute world coords), [[Blocks]].
+See also [[Entity Positions]] (absolute world coords), [[Blocks]],
+[[Homing Missiles (lock-on + scripted flight)]] (a full scripted-projectile
+consumer of this API; note `RocketTurret`'s launch manager still uses the 2.x
+call shape and needs this note's 3.0.0 fixes if revived).

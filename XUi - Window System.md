@@ -586,6 +586,41 @@ System.Drawing — deterministic seed, no art tools needed):
 Child `pos` may be negative/above the parent rect (the glow overhangs by 4px) —
 positions are plain offsets; nothing clips outside a scroll view.
 
+### Tabs inside one window (no window_group per tab)
+
+To split a window that already exists into tabs without moving a single child
+coordinate: wrap each tab body in one full-window `<rect>` at the SAME `pos`
+(e.g. `pos="0,-44"`, leaving room for the tab bar), and toggle
+`ViewComponent.IsVisible` on those two rects from the controller.
+
+```xml
+<rect name="tabFloors"      depth="3" pos="0,-44" width="880" height="596">…</rect>
+<rect name="tabPermissions" depth="3" pos="0,-44" width="880" height="596" visible="false">…</rect>
+```
+
+Why this is cheap:
+
+- `XUiView.IsVisible` setter calls `uiTransform.gameObject.SetActive(value)`,
+  so hiding the wrapper hides every descendant — children keep their own
+  `IsVisible` state and come back exactly as they were.
+- `XUiController.GetChildById` walks the whole subtree recursively, so every
+  existing `GetChildById("txtWhatever")` in the controller keeps resolving
+  after the wrap. Only the XML indentation changes.
+- A plain `<rect>` (no `style="press"`) has no collider, so a full-window
+  wrapper does not eat clicks meant for the children.
+- Child `pos` stays relative to the wrapper, so a wrapper at `0,-44` shifts
+  the whole tab body down 44px in one edit — including positions the
+  controller writes at runtime (`ViewComponent.Position = …`).
+
+A hidden tab's textfields still hold their text, so "commit typed values on
+close" logic needs no tab awareness.
+
+Tab buttons are just two `style="press"` rects; tint the active one by holding
+a reference to its `<sprite>` as `XUiV_Sprite` and setting `.Color`
+(`XUiV_Sprite.Color` is a plain settable `Color`). Working example:
+`windowElevatorSettings` + `ElevatorSettingsController.ShowTab` in the Elevator
+mod (Floors / Permissions).
+
 > **Generating atlas PNGs from PowerShell**: `Add-Type -TypeDefinition $cs
 > -ReferencedAssemblies System.Drawing` FAILS under pwsh 7 (System.Drawing.Common
 > on .NET 10 forwards to a private `System.Private.Windows.GdiPlus` assembly that

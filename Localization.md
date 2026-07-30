@@ -59,6 +59,13 @@ In block definitions:
 </block>
 ```
 
+### Player-facing title keys
+
+- An item or block title key is the definition's exact internal `name`; `DescriptionKey` supplies only the longer description and cannot replace the title row.
+- Add or verify the exact title row whenever a definition is created or renamed. A missing title row displays the raw identifier (for example, `elevatorAutoDoorDouble`).
+- Use short, natural English rather than mechanically copying camelCase/PascalCase. Usable block titles can be inserted into interaction prompts such as `(E) Use …`, so an action-oriented title like `Open Elevator Door` may read better than a technical label.
+- ModForge's block editor exposes this as **General → In-game name**. It writes `Localization.csv` for 3.0 and mirrors an existing `Localization.txt` for pre-3.0 compatibility while preserving the other CSV columns (added 2026-07-25).
+
 ---
 
 ## Inline Item Links

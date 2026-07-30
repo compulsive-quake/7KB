@@ -152,6 +152,20 @@ form (still visible in older mods like SentryLight) no longer overrides anything
 copying signatures from an un-migrated sibling mod produces methods that silently
 never get called. Reflect on the current assembly instead.
 
+### The rest of the `clrIdx` sweep (hit while migrating Shredder, 2026-07)
+
+Same removal, other members — these surface as ordinary compile errors once the
+activation overrides are fixed, **except the first one, which compiles fine and
+fails at Harmony patch time instead**:
+
+| 2.x | 3.0.0 |
+|---|---|
+| `OnBlockEntityTransformAfterActivated(WorldBase, Vector3i, int _cIdx, BlockValue, BlockEntityData)` | drops `_cIdx` — a Harmony patch still declaring `_cIdx` throws `Parameter "_cIdx" not found` |
+| `BlockPlacement.Result.clrIdx` | field removed (`placement/pos/blockPos/blockFace/blockValue/propTransform` only) |
+| `world.GetDensity(0, pos)` | `world.GetDensity(int _x, int _y, int _z)` |
+| `new BlockChangeInfo { pos = p, bChangeDensity = true, density = d }` | no `pos` field — use a ctor: `new BlockChangeInfo(new BlockValueRef(p), d)` |
+| `TakeItemWithTimer(_cIdx, pos, bv, player)` | `takeItemWithTimer(pos, bv, player, TakeDelay)` (instance, `TakeDelay` comes from `BlockPowered`), or static `Block.TakeItemWithTimer(pos, bv, player, delay, canTakeCallback = null)` |
+
 ## Block lifecycle signatures (3.0, reflection-verified)
 
 `OnBlockAdded` gained a trailing `PlatformUserIdentifierAbs`; the other two are

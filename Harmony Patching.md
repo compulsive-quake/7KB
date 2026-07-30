@@ -395,6 +395,30 @@ Facts that make this work (verified against 3.0.x Assembly-CSharp + InControl.dl
   + shift held + mod feature armed) so a user who rebinds the vanilla action to
   another key is unaffected.
 
+### Variant: swallowing the window-refocus click (zPhone `FocusClickGuard`, 2026-07)
+
+Clicking an unfocused 7DTD window delivers that click to gameplay — the held
+item swings/fires. Same read-side patch fixes it; the differences are the
+trigger and the release semantics:
+
+- Arm in `OnApplicationFocus(true)` on a `DontDestroyOnLoad` MonoBehaviour —
+  Unity calls it before any `Update` in that frame, so arming is
+  script-order-safe. Open a short grace window (~0.3 s unscaled).
+- **Latch inside the getter postfix**, not in your `Update`: if armed and
+  `Input.GetMouseButton(0/1)` is physically held, start suppressing. Your
+  component's `Update` may run *after* `PlayerMoveController.Update` in the
+  refocus frame, so an Update-side latch can miss the first read.
+- Falsify `IsPressed`, `WasPressed` **and `WasReleased`** for the local set's
+  `Primary`/`Secondary` (compare via `ReferenceEquals` against
+  `PlatformManager.NativePlatform.Input.PrimaryPlayer`). `PlayerMoveController`
+  fires attacks off `Primary.IsPressed` (~line 1941) but bows/charged releases
+  off `Primary.WasReleased` (~line 2011) — swallowing only the press turns the
+  refocus click into a release-fire.
+- Keep suppressing until both mouse buttons are up **plus one extra frame**, so
+  the trailing `WasReleased` read is falsified regardless of script order.
+- Alt-tab refocus via keyboard opens the grace window but no button is held, so
+  it expires harmlessly; deliberate clicks after the grace window pass through.
+
 ---
 
 ## Gotchas

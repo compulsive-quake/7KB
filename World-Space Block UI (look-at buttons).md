@@ -82,6 +82,70 @@ shared by every instance *and* is what the placement preview shows), and let a
 per-block view add only the changing children onto each clone. The pooling
 death-check below still applies to those children.
 
+**Dressing the placement ghost with sample content.** The flip side of that
+split is that the held-item preview is the *bare* chassis — a blank plate with
+a dead screen, which tells the player nothing about where the buttons land.
+Give the preview (and only the preview) a stand-in face:
+
+- Hook `ItemClassBlock.CreateMesh` with a **Postfix** and gate on
+  `_purpose == BlockShape.MeshPurpose.Preview`. That's the single funnel every
+  held-block ghost goes through, and the purpose flag is what separates it from
+  the chunk and mover-proxy paths (which get their real dressing elsewhere).
+  One overload, params `_blockValue` / `_purpose` / `__result` — 3.0.x.
+- `__result` is the bare **wrapper**; anchor on `__result.GetChild(0)` (the
+  wrapper trap below).
+- **Build the sample face ONCE into a template and `Instantiate` it per
+  preview** — do *not* rebuild it per call. `RenderDisplacedCube` rebuilds the
+  ghost on every focus-block/rotation/face change and tears the old one down
+  with a plain `Object.Destroy`; its mesh recycling (`VoxelMesh.AddPooledMesh`)
+  is explicitly skipped for `BlockShapeModelEntity`, and destroying a
+  GameObject never frees the `Mesh` assets under it. Rebuilding per preview
+  leaks a mesh per quad every time the crosshair moves to a new block.
+  `Instantiate` copies `MeshFilter.sharedMesh` **by reference**, so a template
+  shares its meshes with every clone. Park it under an inactive holder (same
+  active-prefab-under-inactive-holder trick as the model itself).
+- Reuse the *real* rebuild path with a synthetic data object (Elevator feeds it
+  a six-floor elevator parked at floor 1) so the preview cannot drift from what
+  actually gets placed.
+- No teardown needed on your side: `RenderDisplacedCube` deep-copies materials
+  for the preview (`Renderer.materials`, per renderer) and destroys those copies
+  in `DestroyPreview`, so your shared art set is never touched; and its
+  `disableAllComponents` / emission / `SetLayerRecursively(…, 2)` passes run
+  *after* your postfix, so the added art is treated exactly like the chassis.
+  Note `TextMesh` is a `Component`, not a `MonoBehaviour`, so
+  `disableAllComponents` leaves labels alone.
+
+Reference: `ElevatorPanelView.DressPreview` / `PreviewFace` +
+`Patch_ItemClassBlock_CreateMesh`.
+
+**More than one code-built model in the same mod.** Elevator ships two now —
+`elevatorPanelModel` (the cab panel) and `elevatorCallButtonModel` (the hall
+call button, `ElevatorCallButtonModel.cs` + `ElevatorCallLights.cs`). Two
+things generalise:
+
+- **One shared art set, two chassis.** Both models build from the same
+  `ElevatorPanelArt` materials/meshes (`EnsureArt` latches, so whichever block
+  inits first builds the set; the second reuses it). Keeping all runtime
+  materials owned by one module is what makes the `DestroyObject` exemption
+  below sufficient.
+- **Each model needs its OWN `getPrefab` and `DestroyObject` prefix**, keyed on
+  its own `modelName`. Two prefixes on the *same* method is fine — Harmony runs
+  all of them, each acts only on its model, and if any returns false the
+  original is skipped (so the non-matching prefix returning true is a harmless
+  no-op). Don't try to fold both models into one prefix unless they truly want
+  identical handling.
+
+**The one-block Z shift is a property of the whole `elevatorDoor` panel
+family, not just the inside panel.** A code-built model authored with its
+geometry at anchor-space z≈0 (the natural way) mounts **one block deeper** than
+the vanilla prefab it copies, so its `ModelOffset` Z must be **1.0 less** than
+vanilla's. Confirmed for `elevatorInsidePanel` (vanilla base ladder z
+0.5/1/1.5 → mod −0.5/0/0.5) and applied to `elevatorOutsideButtonPanel`
+(vanilla ladder −0.5/−1/−1.4 → mod −1.5/−2/−2.4). If a code-built pad lands a
+block off the aimed block, this Z term is the first knob. Note the button's
+`ModelOffset` X is **0** (the pad is x-centred, footprint x ±0.079) — only the
+*inside* panel carries the −0.25 X term (its plate is centred x +0.242).
+
 ## Re-dressing a model-entity block at runtime (legacy — prefer the above)
 
 This is how Elevator's panel used to work, and why it was abandoned: hiding
@@ -229,6 +293,39 @@ Remember multiblock children: resolve `_blockPos` to the master
 (`multiBlockPos.GetParentPos`) before keying any lookups — the plane math is
 identical either way since it works in model space.
 
+## A rig only exists where your mod data does
+
+The rig loop for this pattern iterates your own per-block dictionary, not the
+world's blocks: `foreach (kv in MyMod.Signs) { get BlockEntityData at kv.Key;
+build/refresh rig }`. That is what keeps it cheap — but it means a block the
+player has placed and **never configured** has no entry, so it gets no rig, so
+it renders as the bare chassis. Any "not set up yet, press E" message you draw
+in the view is unreachable for exactly the blocks that need it.
+
+Fix it at placement: override `OnBlockAdded` and create the entry (with a
+sensible default link — Elevator's floor directory picks the nearest elevator,
+so a placed sign is already listing the right shaft).
+
+```csharp
+public override void OnBlockAdded(WorldBase _world, Chunk _chunk, Vector3i _pos,
+    BlockValue _bv, PlatformUserIdentifierAbs _addedByPlayer)
+{
+    base.OnBlockAdded(_world, _chunk, _pos, _bv, _addedByPlayer);
+    if (_bv.ischild || MyMover.IsCarrying(_pos)) return;   // see below
+    MyMod.GetOrCreate(_pos);
+}
+```
+
+Ground truth on when it fires (`Chunk.SetBlock`, 3.0.x): **on placement and on
+any other real block change — NOT on chunk load.** `Chunk.SetBlock` calls
+`OnBlockAdded` only under `_notifyAddChange` and only when `blockValue.type !=
+_blockValue.type`; a same-type write goes to `OnBlockValueChanged` instead, and
+loading a chunk from disk doesn't run this path at all. So it is the exact
+mirror of `OnBlockRemoved`, and the two share a caveat in a mod that moves
+blocks: a mover that lifts and re-places blocks trips *both*, so guard both
+with the same "is my mover carrying this position" test or a riding block
+loses (or re-defaults) its config on landing.
+
 ## Depth-tested world-space text (TextMesh without ZTest-Always)
 
 The built-in font material (GUI text shader) is **ZTest Always** — TextMesh
@@ -263,6 +360,23 @@ behind the fill (~half a z-layer) on a material whose render queue is one
 below the fill's — the queue split keeps rim under fill regardless of view
 angle. `FontStyle.Bold` on the fill helps legibility at distance. Cost is
 5 meshes per label; fine when rigs rebuild only on content-hash changes.
+
+**Make the rim colour a parameter, not a constant.** The rim's job is to hold
+the glyph off *the surface it sits on*, so it takes the SURFACE's value, not a
+fixed dark. A hardcoded dark rim is right for light-on-dark engraving and
+actively wrong on a light applied plate — there it just fattens dark lettering
+into a blob. Elevator's `ElevatorPanelArt.MakeText` has both: the default
+`OutlineColor` (near-black) for the cab panel's light text on dark metal, and
+an explicit light `CellTextOutline` for the floor directory's dark text on its
+bright name plates.
+
+**One texture, two tints — author it near-white.** `Sprites/Default`
+multiplies colour × texture, so a tint can only ever *darken*. A strip/plate
+texture meant to serve both a dark and a light variant (Elevator's
+`elev_directory_cell.png`: the applied row plate behind both the charcoal
+number cell and the bright name cell) must therefore top out near 255 and
+carry only *shape* — bevels, a dome, edge falloff. Anything mid-grey in the
+texture caps the light variant.
 
 ## Layering flat art without z-fighting
 
@@ -304,8 +418,8 @@ Deploy-kind trap: a PNG under `UIAtlases/**` is normally **xui** (hot-
 reloadable). But the *world* panel doesn't read the atlas — `EnsureArt`
 `LoadImage`s the PNG off disk once and caches the material, so an
 `xui reload` won't refresh it. A world-panel texture change only shows after a
-full **restart** deploy (world reload re-runs `EnsureArt`). Touch the C# too
-(e.g. `PlateTint`) and it's a restart deploy anyway.
+full **restart** deploy (world reload re-runs `EnsureArt`). Same for the
+world plate under `resources/`, which isn't an atlas sprite at all.
 
 ## The back of the panel shows the art mirrored — make the shell opaque
 
@@ -337,10 +451,252 @@ on the same effective colour as the tinted face art (multiply by `PlateTint`,
 then use that same average for the `Hidden/Internal-Colored` fallback's
 `_Color`). Note the ceiling: `Sprites/Default` is unlit and clamps
 `color × texture`, so the sprite's own brightness caps the plate — you can't
-brighten past the PNG with tint, only tint or darken it. Elevator's current
-plate is bright satin aluminium authored straight into the PNG (~0.75
-luminance), so `PlateTint` is fully **neutral** (1,1,1) and the fallback
-`_Color` ≈0.73; the plate shows the sprite as-is. (History, same principle:
-earlier iterations used a darker sprite lifted by a near-white `PlateTint` —
-~0.45 brushed steel, before that ~0.3 bronze.)
-Reference: Elevator `src/ElevatorPanelView.cs` (`MakeShellMat`, `TintTexture`).
+brighten past the PNG with tint, only tint or darken it.
+Reference: Elevator `src/ElevatorPanelArt.cs` (`MakeShellMat`, `TintTexture`).
+
+## Making a world-space surface read as METAL
+
+Long-running failure on Elevator's panel: every iteration of the plate
+tint (~0.3 bronze → ~0.45 brushed steel → neutral 1,1,1 on a bright sprite →
+0.46 back down again) produced the same complaint — "it looks like a white
+screen, not aluminium". Tint was never the variable. Four things were.
+
+**1. An unlit quad cannot be metal.** Metal reads as metal because of a
+specular highlight that *moves with the viewer* plus an environment
+reflection. `Sprites/Default` has neither: same flat value from every angle
+in every light — a printed poster. No amount of texture work fixes this on
+its own, and no tint ever will.
+
+**2. Broad shading is the cue — grain is not.** The old plate spanned
+~158..212 of 255 (a ~9% value spread) then got multiplied flat by the tint.
+That is a grey card by construction. Bake in:
+- a **reflection ramp** — bright ceiling at the top, dark floor at the
+  bottom, soft horizon slightly above centre, plus a soft specular band
+  across the upper third. Cheapest "this is reflective" signal there is, and
+  on a stock-Unity-shader quad (which gets no voxel light) it is the *only*
+  thing keeping the plate from going flat;
+- a broad **cylindrical roll** darkening toward the left and right edges, so
+  the sheet isn't dead flat.
+
+**Do not paint brush grain.** This note previously recommended "two-octave
+scratches" and an anisotropic specular band. Measuring vanilla's own art
+killed both: at any distance a player actually views these panels from, fine
+per-column noise never resolves as a satin brush — it resolves as **full-
+height stripes**, and the report you get back is "cartoonish vertical lines".
+
+**Ground truth — vanilla's panel metal** (`elevatorDoor_d` / `_n` / `_rmom`
+in `Data/Addressables/Standalone/automatic_assets_entities/doors.bundle`, the
+albedo set shared by `elevatorInsidePanel` and `elevatorOutsideButtonPanel`):
+
+| map | plate field |
+|---|---|
+| albedo `_d` | **RGB(156, 147, 134)**, σ ≈ 1.0 over the whole field |
+| normal `_n` | flat (127, 126) everywhere — no grain in the surface either |
+| `_rmom` | roughness ≈ 0.22, metallic ≈ 0.83 |
+
+So vanilla's aluminium is a **dead-flat warm greige** with a **flat normal**,
+and every metal cue — the sheen sliding across the call button, the warm cast
+under the sun — comes from the shader, not from anything painted on. Match
+that hue with a luminance-preserving multiplier over a plain grey ramp
+(156:147:134 normalised through 0.299/0.587/0.114 ⇒ **×1.053 / ×0.992 /
+×0.905**), and add nothing but sub-1-LSB dither to stop the ramp banding.
+Elevator's `MetalPlate`/`CabPlate` in `tools/gen_ui_sprites.ps1` do exactly
+this. Use the same multiplier on the **button sprites' rims**, not just the
+plate: vanilla's discs are brass-rimmed against a near-neutral sheet, and that
+warm-on-cold contrast is most of what reads as "elevator" at a glance — a
+cool-rimmed disc on a dark plate reads as a chrome pip. Watch the tints on
+*neighbouring* materials too — a cool blue-grey
+shell multiplier (Elevator had `0.88,0.88,0.91`) pulls the folded edges back
+toward steel while the face goes warm, and the panel comes apart.
+
+Sampling recipe (UnityPy 1.25 is installed; ~10 s):
+
+```python
+import UnityPy, statistics
+env = UnityPy.load(r"…\automatic_assets_entities\doors.bundle")
+for o in env.objects:
+    if o.type.name == "Texture2D":
+        d = o.read()
+        if d.m_Name == "elevatorDoor_d":
+            px = list(d.image.convert("RGB").crop((600,300,1400,1500)).getdata())
+            print([round(statistics.mean(p[c] for p in px)) for c in range(3)])
+```
+
+Don't commit the dumped PNGs — they're shipped game art, and the numbers are
+what you needed.
+
+**Do not bake a bevel.** It's the obvious next idea and it's wrong: any ring
+of contrast at a fixed distance from the edge reads as a *border painted on
+the panel*, whatever its colour. Elevator shipped a dark seam (read as a
+black border), then a bright chamfer (read as a white one), before dropping
+edge-aligned detail entirely. Let the plate run clean to the boundary — the
+silhouette comes from the shell's edge quads catching the light differently
+to the face, which is how a real folded sheet shows its edge anyway.
+
+**3. Texture aspect must match the quad's aspect.** UVs are the full 0..1
+rect, so a 1:2 PNG on a 1:4.15 face stretches 2.07× and smears the grain out
+of existence. Match it: Elevator's 0.483 × 2.003 m face gets a 256×1024 PNG
+(~520 px/m, in line with vanilla block texel density). Also set
+`filterMode = Trilinear` and `anisoLevel = 8` — a 2 m plate is normally seen
+at a grazing angle, which is exactly the case aniso exists for.
+
+**4. A world texture and a XUi sprite cannot be the same file.** 2-D UI is
+composited unlit, so XUi plates want bright and flat; a world plate must
+carry its own lighting, so it wants dark and high-contrast. Sharing one PNG
+means one of the two is always wrong — that fight *is* the whole tint
+history above. Split them: XUi sprites stay in `UIAtlases/UIAtlas/`, the
+world texture goes in `resources/` (keeping it out of the atlas, which it
+was never read from anyway — see the deploy-kind trap above).
+
+**4b. …but a XUi window that depicts the block wants a THIRD plate.** Elevator's
+in-cab floor picker (the window the horn pops up while you sit in the car) is
+looking at the panel on the wall, so a bright settings-sheet plate reads as a
+different object. That window gets its own atlas sprite —
+`elev_panel_cab.png`, `CabPlate` in `tools/gen_ui_sprites.ps1` — authored to
+the *world* rules (reflection ramp, vanilla's warm-greige hue, no grain) but
+lifted and range-compressed, because a UI sprite never gets the scene's
+exposure back and the dark button discs still have to show against it. Author
+the ramp against the window's own furniture (specular band behind the header,
+floor bounce along the footer), and keep the sprite at the window's aspect —
+the ramp is placed by proportion, so a stretched sprite puts the highlight in
+the wrong place. Same knock-on as the world plate: a dark plate flips every
+label in the window from near-black to light, and the *rest* of the mod's
+windows can stay bright — one dark window among light ones reads as intent
+when it depicts a dark object.
+
+Match the live parts too, or the illusion breaks the moment the car moves: the
+window's readout and lamps should be driven off the same helpers/palette the
+world panel uses (`ElevatorPanelArt` colours, `ElevatorPanelView.NearestFloor`,
+the same blink period), not re-typed constants.
+
+### Using a lit shader (`Standard`) on code-built block art
+
+Worth it — it buys the real moving specular — but three gotchas:
+
+- **Hand-built meshes need `mesh.normals`.** A lit shader on a mesh with no
+  normals renders **black**. For a double-sided quad built from one set of 4
+  verts (both windings, shared verts) there is only one normal per vertex, so
+  use the outward one. With Elevator's UV-ordered in-plane axes that is
+  `Vector3.Cross(up, right)`, not `Cross(right, up)`. Set `tangents` too.
+- **7DTD's voxel lighting does not reach a stock Unity shader** (it rides in
+  the game's own block shaders). In an unlit shaft a `Standard` plate goes
+  black — worse than the white it replaced. Fix with an **emission floor**:
+  `_EmissionMap` = the plate texture, `_EmissionColor` = a grey,
+  `globalIlluminationFlags = EmissiveIsBlack` so it stays a pixel-shader
+  effect. Reads as the backlit face a real cab has.
+
+  **Keep that floor LOW — ~0.10-0.13, not ~0.30.** This is the single
+  highest-leverage number on the surface and it is easy to get backwards.
+  Because voxel light never arrives, emission is not a floor under the
+  lighting, it very nearly *is* the lighting: at 0.30 it accounted for ~90% of
+  Elevator's rendered panel and the `Standard` setup underneath was decoration.
+  Symptom is a plate that looks identical in a lit lobby and a black shaft, and
+  reads far brighter than vanilla's next to it. See "Measure the render, not
+  the texture" below for how to pick the number instead of guessing it.
+- **`StripLighting` must not touch the lit renderers.** `reflectionProbeUsage
+  = Off` leaves a metallic material with nothing to reflect and it collapses
+  straight back to flat grey. Set `lightProbeUsage`/`reflectionProbeUsage` to
+  `BlendProbes` (falls back to the sky probe when no local probe exists).
+  Shadow *casting* stays off — an inset plate only shadow-acnes itself.
+- **Light the WHOLE chassis or none of it.** A lit face with an unlit shell
+  (back + edge quads) looks fine in the sun and falls apart indoors: the face
+  dims with the scene, the unlit edges don't, and the panel reads as a dark
+  plate with glowing trim. Put the shell on the same shader, a little rougher
+  and darker — it still writes depth, so the occlusion above is unaffected.
+
+Tuning: **move the ALBEDO with the shader, or you will chase your tail.**
+Elevator ran metallic/smoothness at 0.9/0.74 ("polished chrome under the
+midday sun"), reacted by halving to 0.45/0.38, and this note used to say that
+landed it. It didn't — it traded chrome for a flat card whose look came
+entirely from a steep painted gradient and a fat emission floor. The step that
+was missing: **a metal's reflection is multiplied by its albedo**, so high
+metallic only means chrome when the albedo is bright. Darken the plate texture
+(Elevator went 76..184 → 62..110) and vanilla's own measured `_rmom` numbers —
+metallic 0.83, smoothness 0.78 (roughness 0.22) — land on vanilla's own look
+rather than a mirror. Prefer copying the game's measured values over inventing
+a pair; you already dumped the map to get the albedo hue.
+
+Whatever you change, pull the texture's baked specular band by the same factor
+— a baked highlight and a real one at different strengths visibly fight. And
+once the material reflects for real, the baked ramp should get *flatter*, not
+just dimmer: it was standing in for a reflection you now have.
+
+### Measure the render, not the texture
+
+Eyeballing "does this match vanilla" across a screenshot fails, because the
+texture value, the emission floor and the scene all compound. Two cheap
+measurements settle it in a minute, and both beat a deploy/relaunch cycle:
+
+**1. Sample the screenshot.** Put your block next to the vanilla one it should
+match, screenshot, and read actual pixels — `System.Drawing` from PowerShell,
+average + min/max luminance over a rect on each plate field. Elevator's
+numbers, for calibration: vanilla `elevatorInsidePanel` renders at **luminance
+25..33, near-neutral**, in a lit indoor room (all its contrast lives in the
+specular highlight and the brass button rims, not the field). The mod's three
+plates were at 76, 90 and 108 — i.e. the problem was never subtle, but no
+amount of staring had produced a number.
+
+**2. Predict the render from the texture.** While emission dominates, the
+rendered value is just `sRGB(linear(texel) × _EmissionColor)`. Run the plate
+PNG through that and compare against the sampled vanilla figure *before*
+deploying — Elevator's retune predicted 18..37 (avg 25) and that is what
+shipped. Also worth compositing a quick GDI+ mock of the whole surface (plate
++ cells + button sprites at their real tints) to check contrast between layers,
+since unlit sprite art is a straight multiply and doesn't go through emission
+at all. Consequence worth knowing: **once the plate is dark, applied cells must
+tint UP, not down.** A cell tinted below the board's rendered value has nothing
+for its bevels to show against and the row dissolves into the plate.
+
+### One generator, one metal — don't UV-slice across surfaces
+
+If a mod hangs several plates on the wall (Elevator: cab panel, hall call pad,
+floor directory board), author them from **one function at one ramp and one
+tint**, emitting one PNG per surface at that surface's aspect. Two failure
+modes this avoids:
+
+- Three separately-tuned textures drift into three different alloys. Elevator's
+  sign was authored "bright stainless, because a hall sign is a different piece
+  of metal to a cab panel" — defensible in isolation, and next to the panel it
+  read as printer paper taped to the wall.
+- **Sharing one texture and slicing it by UV** fixes the alloy but moves the
+  highlight. The call pad took the middle half of the panel's 1:4.15 texture:
+  right aspect, but that texture's specular band is placed for the upper third
+  of a 2 m panel, so it landed on the pad's top edge. The band's position is
+  the one thing that legitimately differs per surface — make it the parameter.
+
+Same rule for the palette: put the accent colours in one shared class and use
+them everywhere. Elevator's call arrows were green-up/amber-down while every
+other lamp, LED and halo in the mod was amber; the arrow shape already carries
+the direction (as it does on every real hall button), so the colour was free to
+say "same system" instead.
+
+Trim: once the plate is real metal, **delete the dark border frame**. A
+quad-drawn dark edge strip is a UI convention that reads as a black outline
+painted on the panel — and don't replace it with a baked bevel either (see
+"Do not bake a bevel" above). The shell's edge quads should take a thin UV
+sliver off the matching side of the plate so the brushing continues round the
+fold instead of restarting.
+
+`Standard` can be stripped from a build, so keep the `Sprites/Default` path
+as the fallback; with the texture authored per (2) it still reads as metal,
+just without the moving highlight. Log which path was taken.
+
+Knock-on: a dark plate flips the label scheme. Elevator's floor names were
+near-black (28,29,33) with a light rim, sized for a near-white plate; on real
+metal they invert to light (232,235,240) with a dark rim — which is what a
+real engraved-and-filled cab panel looks like anyway. Flip **every** surface at
+once, including the ones with a good local reason not to: Elevator's directory
+sign kept dark-on-light rows on the (correct) argument that a real lobby board
+has a dark number plate on a light backing, and the result was the one surface
+in the mod reading the other way round. Polarity is a mod-wide decision — the
+applied-plate read survives inversion, since it comes from the strip texture's
+bevels and the value *step* against the board, not from which is darker.
+
+Don't forget the **inventory icons** when the world art changes value. They
+mirror the same ramp by proportion, so they go stale silently — but they can't
+just take the world numbers either: the icon grid composites unlit on a dark
+field, where a true-to-world dark plate is a black tile. Stamp the same ramp
+and hue with a lift factor (Elevator: ×1.55).
+
+Reference: Elevator `src/ElevatorPanelArt.cs` (`MakePlateMat`,
+`EnableLighting`, `LoadTexture`), `tools/gen_ui_sprites.ps1` (`WorldPlate`).
